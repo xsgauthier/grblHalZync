@@ -62,6 +62,7 @@ if(UNIX)
         set(platform_LIB
             rt
             pthread
+            bsd
         )
     endif(APPLE)
 endif(UNIX)

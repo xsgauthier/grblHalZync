@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <bsd/string.h>
 
 #include "grbl/hal.h"
 #include "grbl/protocol.h"
