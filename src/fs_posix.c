@@ -35,6 +35,7 @@
 #include <sys/stat.h>
 #include <bsd/string.h>
 
+#include "fs_posix.h"
 #include "grbl/hal.h"
 #include "grbl/protocol.h"
 #include "grbl/platform.h"

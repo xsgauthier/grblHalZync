@@ -40,3 +40,5 @@ build*
 # run output
 *.out
 *.DAT
+*.tmp
+

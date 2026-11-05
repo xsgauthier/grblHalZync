@@ -21,4 +21,9 @@
 
 #pragma once
 
+typedef struct {
+        const char *name;
+        size_t len;
+} vfs_path_t;
+
 bool fs_posix_mount (const char *path, const char *dir);
