@@ -12,7 +12,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-fno-strict-aliasing)
 endif()
 
-add_compile_definitions(F_CPU=16000000)
+add_compile_definitions(F_CPU=25000000)
 #add_compile_definitions(SQUARING_ENABLED=1)
 
 # Capture the effective build-time flags for the -v/--version output.
@@ -66,6 +66,29 @@ if(UNIX)
         )
     endif(APPLE)
 endif(UNIX)
+
+add_executable(grblHAL_zynq 
+    src/main.c 
+    src/simulator.c
+    src/driver_zynq.c
+    src/eeprom.c
+    src/grbl_eeprom_extensions.c
+    src/mcu.c
+    src/serial.c
+    src/grbl_interface.c
+	src/fs_posix.c
+    ${platform_SRC}
+)
+
+target_link_libraries(grblHAL_zynq PRIVATE
+    m
+    grbl
+	sdcard
+    ${platform_LIB}
+)
+
+# Generated build_info.h lands in the build dir.
+target_include_directories(grblHAL_zynq PRIVATE src ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(grblHAL_sim 
     src/main.c 
