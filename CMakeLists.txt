@@ -74,11 +74,6 @@ if(UNIX)
     endif(APPLE)
 endif(UNIX)
 
-# Include src/zynq/CMakeLists.txt only if the target is grblHal_zynq
-if(TARGET grblHAL_zynq)
-    add_subdirectory(src/zynq)
-endif()
-
 add_executable(grblHAL_zynq 
     src/main.c 
     src/simulator.c
@@ -98,6 +93,11 @@ target_link_libraries(grblHAL_zynq PRIVATE
     zynq
     ${platform_LIB}
 )
+
+# Include src/zynq/CMakeLists.txt only if the target is grblHal_zynq
+if(TARGET grblHAL_zynq)
+    add_subdirectory(src/zynq)
+endif()
 
 # Generated build_info.h lands in the build dir.
 target_include_directories(grblHAL_zynq PRIVATE src ${CMAKE_CURRENT_BINARY_DIR})
