@@ -75,10 +75,9 @@ if(UNIX)
 endif(UNIX)
 
 # Include src/zynq/CMakeLists.txt only if the target is grblHal_zynq
-if (TARGET grblHAL_zynq)
-    include(src/zynq/CMakeLists.txt)
-endif(TARGET grblHAL_zynq)
-
+if(TARGET grblHAL_zynq)
+    add_subdirectory(src/zynq)
+endif()
 
 add_executable(grblHAL_zynq 
     src/main.c 
