@@ -10,10 +10,16 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     # ISR handlers run on a separate host thread; keep type-punning-heavy
     # embedded code out of strict-aliasing territory.
     add_compile_options(-fno-strict-aliasing)
+    add_compile_options(-Wno-discarded-qualifiers)
 endif()
 
 add_compile_definitions(F_CPU=25000000)
 #add_compile_definitions(SQUARING_ENABLED=1)
+
+# add compile deficnitions REAL_IS_DOUBLE if 64 bit os target is detected. This is needed for the simulator to work correctly on 64 bit systems.
+#if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+#    add_compile_definitions(REAL_IS_DOUBLE)
+#endif(CMAKE_SIZEOF_VOID_P EQUAL 8)
 
 # Capture the effective build-time flags for the -v/--version output.
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _sim_build_type)
@@ -31,6 +37,7 @@ configure_file(
 
 include(src/grbl/CMakeLists.txt)
 include(src/sdcard/CMakeLists.txt)
+
 
 if (WIN32)
     add_compile_definitions(PLATFORM_WINDOWS)
@@ -66,6 +73,12 @@ if(UNIX)
         )
     endif(APPLE)
 endif(UNIX)
+
+# Include src/zynq/CMakeLists.txt only if the target is grblHal_zynq
+if (TARGET grblHAL_zynq)
+    include(src/zynq/CMakeLists.txt)
+endif(TARGET grblHAL_zynq)
+
 
 add_executable(grblHAL_zynq 
     src/main.c 
