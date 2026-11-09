@@ -1,0 +1,190 @@
+/*
+  grbl_interface.c - hooks to interact with grbl app running on simulator
+
+  Part of Grbl Simulator
+
+  Copyright (c) 2012 Jens Geisler
+  Copyright (c) 2014-2015 Adam Shelly
+
+  2020-2025 - modified for grblHAL by Terje Io
+
+  Grbl is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  Grbl is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include <stdio.h>
+
+#include "mcu.h"
+#include "driver.h"
+#include "simulator.h"
+
+#include "grbl/hal.h"
+#include "grbl/protocol.h"
+#include "grbl/state_machine.h"
+
+int block_position[N_AXIS] = {0}; //step count after most recently planned block
+uint32_t block_number = 0;
+double next_print_time;
+
+static void print_steps(bool force);
+static void printBlock(void);
+
+//True when the grbl thread has nothing left to do: no queued input, no planned
+//or executing motion, no running delay (G4 dwell) and no response bytes still
+//on their way out. The state check alone misses dwells, which run in STATE_IDLE.
+static bool grbl_is_idle (void)
+{
+    return state_get() < STATE_HOMING &&
+            plan_get_current_block() == NULL &&
+             !driver_delay_pending() &&
+              hal.stream.get_rx_buffer_count() == 0 &&
+               !(uart.tx_irq_enable || uart.tx_flag);
+}
+
+void grbl_app_init (void)
+{
+    //setup local tacking vars
+    next_print_time = args.step_time;
+}
+
+void grbl_per_tick (void)
+{
+    //maybe print the position every tick
+    //print_steps(0);
+
+    //TODO:
+    //  set limit pins based on position,
+    //  set probe pin when probing.
+    //  if VARIABLE_SPINDLE, measure pwm pin to report speed?
+}
+
+void grbl_per_byte (void)
+{
+    if(sim.socket_fd) {
+        // In socket mode the console keyboard only toggles simulated pins, so
+        // polling it every byte slot (~11.5k conhost round-trips per simulated
+        // second on Windows) is wasted syscalls. Every 128 slots (~11 ms of
+        // sim time at 115200 baud) is far below human reaction time.
+        static uint_fast8_t kbd_divider = 0;
+
+        if((++kbd_divider & 0x7f) == 0)
+        switch (platform_poll_stdin()) {
+
+            case '?':
+                protocol_enqueue_realtime_command(CMD_STATUS_REPORT);
+                break;
+
+            case '@':
+                protocol_enqueue_realtime_command(CMD_STATUS_REPORT_ALL);
+                break;
+
+            case 0x06:
+                sim.exit = exit_REQ;
+                break;
+        }
+    }
+}
+
+// Print the most recently planned block to the -b block log.
+// Must run on the grbl thread.
+void grbl_print_recent_block (void)
+{
+    // In socket mode stdout is a live console, and a console write that stalls
+    // (Windows QuickEdit text selection blocks writers outright, and conhost
+    // rendering is slow even when healthy) would freeze the grbl thread. Only print
+    // there when -b redirected block output to a file.
+    if(!sim.socket_fd || args.block_out_file != stdout)
+        printBlock();   //maybe print newest block
+}
+
+void grbl_app_exit (void)
+{
+    //force final position print
+    //print_steps(1);
+}
+
+//show current position in steps
+static void print_steps (bool force)
+{
+    static plan_block_t* printed_block = NULL;
+
+    //Allow exit when idle. Prevents aborting before all streamed commands have run
+    //(kept first - order matters: this must run every tick regardless of -r).
+    if (sim.exit == exit_REQ && grbl_is_idle()) {
+        //The grbl thread runs on wall time and may only look idle for a moment,
+        //e.g. between the hal.delay_ms() slices of a G4 dwell or between draining
+        //the input and planning a move. Give it real time to show new activity
+        //before trusting the snapshot; simulated time is no yardstick for this
+        //since it can run far ahead of the grbl thread's progress.
+        platform_sleep(1000);
+        if (grbl_is_idle())
+            sim.exit = exit_OK;
+    }
+
+    if (next_print_time == 0.0)
+        return;  //no printing - bail before the (per-tick) plan_get_current_block()
+
+    plan_block_t* current_block = plan_get_current_block();
+    int ocr = 0;
+
+    // Derive sim time lazily from masterclock. This is byte-identical to the value
+    // formerly stored in sim.sim_time: the same (float)masterclock/(float)F_CPU
+    // float division, assigned to a double, so -r timestamps are unchanged.
+    double sim_time = (float)sim.masterclock / (float)F_CPU;
+
+    #ifdef VARIABLE_SPINDLE
+    if(SPINDLE_TCCRA_REGISTER >= 127) ocr = SPINDLE_OCR_REGISTER;
+    #endif
+
+    if (current_block != printed_block) {
+        //new block.
+        if (block_number) //print values from the end of prev block
+            fprintf(args.step_out_file, "%12.5f %d, %d, %d, %d\n", sim_time, sys.position[X_AXIS], sys.position[Y_AXIS], sys.position[Z_AXIS],ocr);
+
+        printed_block = current_block;
+        if (current_block == NULL)
+            return;
+        // print header
+        fprintf(args.step_out_file, "# block number %d\n", block_number++);
+    }
+    //print at correct interval while executing block
+    else if ((current_block && sim_time>=next_print_time) || force ) {
+        fprintf(args.step_out_file, "%12.5f %d, %d, %d, %d\n", sim_time, sys.position[X_AXIS], sys.position[Y_AXIS], sys.position[Z_AXIS], ocr);
+        fflush(args.step_out_file);
+        //make sure the simulation time doesn't get ahead of next_print_time
+        while (next_print_time <= sim_time)
+            next_print_time += args.step_time;
+    }
+}
+
+// Print information about the most recently inserted block
+// but only once!
+static void printBlock (void)
+{
+    static plan_block_t *last_block;
+
+    plan_block_t *b = plan_get_recent_block();
+    if(b != last_block && b != NULL) {
+        int i;
+        for (i = 0; i < N_AXIS; i++) {
+            if(b->direction.bits & bit(i))
+                block_position[i] -= b->steps.value[i];
+            else
+                block_position[i] += b->steps.value[i];
+            fprintf(args.block_out_file,"%d, ", block_position[i]);
+        }
+        fprintf(args.block_out_file,"%f\n", b->entry_speed_sqr);
+        fflush(args.block_out_file); //TODO: needed?
+        last_block = b;
+    }
+}

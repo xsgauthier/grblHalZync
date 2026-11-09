@@ -79,9 +79,7 @@ add_executable(grblHAL_zynq
     src/simulator.c
     src/eeprom.c
     src/grbl_eeprom_extensions.c
-    src/mcu.c
     src/serial.c
-    src/grbl_interface.c
 	src/fs_posix.c
     ${platform_SRC}
 )
