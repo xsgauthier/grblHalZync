@@ -70,7 +70,6 @@ endif(UNIX)
 add_executable(grblHAL_zynq 
     src/main.c 
     src/simulator.c
-    src/driver_zynq.c
     src/eeprom.c
     src/grbl_eeprom_extensions.c
     src/mcu.c
@@ -84,6 +83,7 @@ target_link_libraries(grblHAL_zynq PRIVATE
     m
     grbl
 	sdcard
+    zynq
     ${platform_LIB}
 )
 
