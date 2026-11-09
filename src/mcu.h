@@ -21,8 +21,11 @@
 */
 
 #ifndef _MCU_H_
-
 #define _MCU_H_
+
+#if PLATFORM_ZYNQ
+#include "zynq/mcu.h"
+#else
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -135,4 +138,6 @@ void mcu_gpio_in (gpio_port_t *port, uint16_t pins, uint16_t mask);
 void mcu_gpio_toggle_in (gpio_port_t *port, uint16_t pins);
 void simulate_serial (void);
 
-#endif
+#endif // PLATFORM_ZYNQ
+
+#endif // _MCU_H_

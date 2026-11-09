@@ -20,8 +20,14 @@
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#if PLATFORM_ZYNQ
+#include "zynq/grbl_interface.h"
+#else
+
 void grbl_app_init(void);           //call to setup ISRs and local tracking vars
 void grbl_per_tick(void);           //call per tick to print steps
 void grbl_per_byte(void);           //call per incoming byte (simulator thread)
 void grbl_print_recent_block(void); //print newest planned block (grbl thread)
 void grbl_app_exit(void);           //call to shutdown cleanly
+
+#endif // PLATFORM_ZYNQ

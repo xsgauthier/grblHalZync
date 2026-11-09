@@ -470,8 +470,8 @@ bool driver_init ()
     systick_timer.irq_enable = 1;
     systick_timer.enable = 1;
 
-    hal.info = "Simulator";
-    hal.driver_version = "261007";
+    hal.info = "Zynq 7000";
+    hal.driver_version = "261109";
     hal.driver_setup = driver_setup;
     hal.rx_buffer_size = RX_BUFFER_SIZE;
     hal.f_step_timer = F_CPU;

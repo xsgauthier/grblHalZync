@@ -40,26 +40,30 @@
 
 #define LIMITS_PORT0 0
 #define LIMITS_IRQ0  portINT(LIMITS_PORT0)
-#define LIMITS_PORT1 1
+#define LIMITS_PORT1 0
 #define LIMITS_IRQ1  portINT(LIMITS_PORT1)
 
-#define SPINDLE_PORT 3
-#define COOLANT_PORT 4
-#define STEP_PORT0   6
-#define STEP_PORT1   7
-#define DIR_PORT     8
-#define STEPPER_ENABLE_PORT 9
+#define SPINDLE_PORT 0
+#define COOLANT_PORT 0
+#define STEP_PORT0   0
+#define STEP_PORT1   0
+#define DIR_PORT     0
+#define STEPPER_ENABLE_PORT 0
 
 #define SPINDLE_MASK 0x03
 #define COOLANT_MASK 0x03
 
-#define CONTROL_PORT        2
+#define CONTROL_PORT        0
 #define CONTROL_IRQ         portINT(CONTROL_PORT)
+
 #define RESET_PIN           0
 #define FEED_HOLD_PIN       1
 #define CYCLE_START_PIN     2
 #define SAFETY_DOOR_PIN     3
 #define ESTOP_PIN           4
+#define PROBE_PIN           5
+#define PROBE_CONNECTED_PIN 6
+
 #define RESET_BIT           (1<<RESET_PIN)
 #define FEED_HOLD_BIT       (1<<FEED_HOLD_PIN)
 #define CYCLE_START_BIT     (1<<CYCLE_START_PIN)
@@ -67,9 +71,7 @@
 #define ESTOP_BIT           (1<<ESTOP_PIN)
 #define CONTROL_MASK        (RESET_BIT|FEED_HOLD_BIT|CYCLE_START_BIT|SAFETY_DOOR_BIT)
 
-#define PROBE_PORT          5
-#define PROBE_PIN           0
-#define PROBE_CONNECTED_PIN 1
+#define PROBE_PORT          0
 #define PROBE_BIT           (1<<PROBE_PIN)
 #define PROBE_CONNECTED_BIT (1<<PROBE_CONNECTED_PIN)
 #define PROBE_MASK          (PROBE_BIT|PROBE_CONNECTED_BIT)

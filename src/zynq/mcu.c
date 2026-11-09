@@ -241,10 +241,6 @@ uint8_t mcu_gpio_get (gpio_port_t *port, uint16_t mask)
     return port->state.value & mask;
 }
 
-void mcu_gpio_toggle_in (gpio_port_t *port, uint16_t pins)
-{
-    mcu_gpio_in(port, (port->state.value & pins) ^ pins, pins);
-}
 
 // Set input pin, trigger interrupt if enabled
 void mcu_gpio_in (gpio_port_t *port, uint16_t pins, uint16_t mask)
@@ -273,6 +269,8 @@ void mcu_gpio_in (gpio_port_t *port, uint16_t pins, uint16_t mask)
 
     port->state.value = (port->state.value & ~mask) | pins;
 }
+
+
 
 // TODO: move to mcu_master_clock() above
 void simulate_serial (void)
@@ -304,3 +302,30 @@ void simulate_serial (void)
         }
     }
 }
+
+static plat_thread_t *io_thread = NULL;
+
+static void *mcu_io_thread (void *arg)
+{
+    while(!io_thread->exit) {
+        
+        sim_yield();
+    }
+
+    return NULL;
+}
+
+void mcu_setup_io_thread(void)
+{
+    io_thread = platform_start_thread(mcu_io_thread);
+}
+
+void mcu_terminate_io_thread(void)
+{
+    if(io_thread) {
+        io_thread->exit = 1;
+        platform_join_thread(io_thread);
+        io_thread = NULL;
+    }
+}
+

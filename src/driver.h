@@ -20,6 +20,10 @@
 
 */
 
+#if PLATFORM_ZYNQ
+#include "zynq/driver.h"
+#else
+
 #include <stdbool.h>
 
 #ifdef _WIN32
@@ -79,3 +83,5 @@
 
 // true while a hal.delay_ms() countdown is running (e.g. the grbl thread blocked in a G4 dwell)
 bool driver_delay_pending (void);
+
+#endif // !PLATFORM_ZYNQ

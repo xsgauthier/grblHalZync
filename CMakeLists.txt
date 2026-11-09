@@ -81,7 +81,6 @@ add_executable(grblHAL_zynq
     src/grbl_eeprom_extensions.c
     src/serial.c
 	src/fs_posix.c
-    ${platform_SRC}
 )
 
 target_link_libraries(grblHAL_zynq PRIVATE
@@ -95,6 +94,7 @@ target_link_libraries(grblHAL_zynq PRIVATE
 # Include src/zynq/CMakeLists.txt only if the target is grblHal_zynq
 if(TARGET grblHAL_zynq)
     add_subdirectory(src/zynq)
+    add_compile_definitions(PLATFORM_ZYNQ)
 endif()
 
 # Generated build_info.h lands in the build dir.

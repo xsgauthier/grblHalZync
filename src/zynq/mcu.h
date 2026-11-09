@@ -132,7 +132,9 @@ void mcu_register_irq_handler (interrupt_handler handler, irq_num_t irq_num);
 void mcu_gpio_set (gpio_port_t *port, uint16_t pins, uint16_t mask);
 uint8_t mcu_gpio_get (gpio_port_t *port, uint16_t mask);
 void mcu_gpio_in (gpio_port_t *port, uint16_t pins, uint16_t mask);
-void mcu_gpio_toggle_in (gpio_port_t *port, uint16_t pins);
 void simulate_serial (void);
+
+void mcu_setup_io_thread(void);
+void mcu_terminate_io_thread(void);
 
 #endif
