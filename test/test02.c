@@ -5,19 +5,17 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/mman.h>
+#include <errno.h>
 
-// Change this base address to match your Vivado Address Editor assignment!
-#define AXI_FIFO_BASE_ADDR   0x43C00000 
-#define MAP_SIZE             0x1000
+// Adjust this path string to match your exact device node name on Debian
+#define AXIS_FIFO_DEV_PATH   "/dev/axis_fifo_0" 
 
-// Xilinx AXI-Stream FIFO Registers Offsets
-#define REG_TDFV             (0x0C / 4)  // Transmit Vacancy (Read Only)
-#define REG_TDFD             (0x10 / 4)  // Transmit Data Write Window
-#define REG_TLF              (0x14 / 4)  // Transmit Length Register (Kickoff)
+// Adjust these based on your FIFO depth (e.g. 512, 1024 words)
+// Writing in controlled bursts prevents blocking the OS thread indefinitely
+#define BURST_SIZE_WORDS     64  
 
 // Stepper Ramp Configurations
-#define MIN_DELAY_CYCLES     50000       // Top Speed (~2 kHz at 100MHz clock)
+#define MIN_DELAY_CYCLES     500       // Top Speed (~200 kHz at 100MHz clock)
 #define MAX_DELAY_CYCLES     500000      // Bottom Starting Speed (~200 Hz)
 #define STEP_INCREMENT       1500        // Acceleration / Deceleration slope smoothness
 
@@ -30,81 +28,84 @@ void handle_sigint(int sig) {
 
 int main() {
     int fd;
-    volatile uint32_t *fifo_regs;
+    uint32_t write_buffer[BURST_SIZE_WORDS];
     
     // Register the OS signal trap
     signal(SIGINT, handle_sigint);
 
-    printf("[+] Opening /dev/mem to access physical registers...\n");
-    fd = open("/dev/mem", O_RDWR | O_SYNC);
+    printf("[+] Opening AXI-Stream FIFO driver: %s...\n", AXIS_FIFO_DEV_PATH);
+    // Opening with O_WRONLY since we are strictly streaming out to the motor
+    fd = open(AXIS_FIFO_DEV_PATH, O_WRONLY);
     if (fd < 0) {
-        perror("[-] Failed to open /dev/mem. Are you running as root (sudo)?");
+        perror("[-] Failed to open the AXI FIFO device node");
+        fprintf(stderr, "[*] Check device permissions or run with sudo.\n");
         return EXIT_FAILURE;
     }
-
-    // Map the physical memory block space directly into our user process space
-    fifo_regs = (volatile uint32_t *)mmap(NULL, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, AXI_FIFO_BASE_ADDR);
-    if (fifo_regs == MAP_FAILED) {
-        perror("[-] Memory mapping failed");
-        close(fd);
-        return EXIT_FAILURE;
-    }
-    printf("[+] Memory successfully mapped at virtual pointer: %p\n", (void*)fifo_regs);
+    printf("[+] Device successfully opened.\n");
 
     uint32_t current_delay = MAX_DELAY_CYCLES;
-    int accelerating = 1; // 1 = Speeding up (decreasing delay), 0 = Slowing down (increasing delay)
+    int accelerating = 1;  // 1 = Speeding up (decreasing delay), 0 = Slowing down
     uint8_t direction = 1; // 1 = Clockwise (Bit 31 High), 0 = Counter-Clockwise (Bit 31 Low)
 
-    printf("[+] Starting continuous Step/Dir ramp pipeline. Press CTRL-C to exit safely.\n");
+    printf("[+] Starting continuous Step/Dir driver ramp pipeline. Press CTRL-C to exit safely.\n");
 
     while (keep_running) {
-        // Read how many free slots currently exist inside the Xilinx FIFO buffer
-        uint32_t vacancy = fifo_regs[REG_TDFV];
-        printf("[+] FIFO Vacancy: %u slots available\n", vacancy);
-
-        if (vacancy > 10) { 
-            // Calculate a burst packet size to send to the FIFO
-            uint32_t burst_size = (vacancy > 64) ? 64 : vacancy - 4;
-            uint32_t bytes_written = burst_size * 4;
-
-            for (uint32_t i = 0; i < burst_size; i++) {
-                // Pack our control word: Bit 31 represents DIR pin, Bits 30-0 represent Delay counts
-                uint32_t packed_word = (current_delay & 0x7FFFFFFF);
-                if (direction) {
-                    packed_word |= (1U << 31);
-                }
-                // Write directly to the Transmit FIFO port
-                fifo_regs[REG_TDFD] = packed_word;
-
-                // Process the acceleration/deceleration triangle logic math
-                if (accelerating) {
-                    if (current_delay > (MIN_DELAY_CYCLES + STEP_INCREMENT)) {
-                        current_delay -= STEP_INCREMENT; // Speed up
-                    } else {
-                        accelerating = 0; // Hit top speed inflection point
-                    }
-                } else {
-                    if (current_delay < (MAX_DELAY_CYCLES - STEP_INCREMENT)) {
-                        current_delay += STEP_INCREMENT; // Slow down
-                    } else {
-                        accelerating = 1; // Hit bottom speed inflection point
-                        direction = !direction; // Flip physical motor direction state on every ramp reset
-                    }
-                }
+        // Construct a batch of step data words inside our stack array
+        for (int i = 0; i < BURST_SIZE_WORDS; i++) {
+            // Pack our control word: Bit 31 = DIR pin, Bits 30-0 = Delay count
+            uint32_t packed_word = (current_delay & 0x7FFFFFFF);
+            if (direction) {
+                packed_word |= (1U << 31);
             }
 
-            // CRUCIAL: Kick off the AXI-Stream transaction by writing the byte count into TLF
-            fifo_regs[REG_TLF] = bytes_written;
-        } else {
-            // FIFO is highly saturated, sleep briefly (~500 µs) to yield CPU cycles to Debian scheduler
+            write_buffer[i] = packed_word;
+
+            // Process the acceleration/deceleration triangle logic math
+            if (accelerating) {
+                if (current_delay > (MIN_DELAY_CYCLES + STEP_INCREMENT)) {
+                    current_delay -= STEP_INCREMENT; // Speed up
+                } else {
+                    accelerating = 0; // Hit top speed inflection point
+                }
+            } else {
+                if (current_delay < (MAX_DELAY_CYCLES - STEP_INCREMENT)) {
+                    current_delay += STEP_INCREMENT; // Slow down
+                } else {
+                    accelerating = 1; // Hit bottom speed inflection point
+                    direction = !direction; // Flip physical motor direction state on every ramp reset
+                }
+            }
+        }
+
+        // Push the entire data packet to the driver
+        // Note: write() requires the size parameter to be in BYTES, not words.
+        ssize_t bytes_sent = write(fd, write_buffer, BURST_SIZE_WORDS * sizeof(uint32_t));
+        
+        if (bytes_sent < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // The driver's internal queue buffer is saturated, sleep briefly and retry
+                usleep(1000);
+            } else if (errno == EINTR) {
+                // Interrupted by Ctrl-C signal
+                break;
+            } else {
+                perror("[-] Fatal error occurred while writing to character device");
+                break;
+            }
+        } else if (bytes_sent < (BURST_SIZE_WORDS * sizeof(uint32_t))) {
+            // Partial write occurred (FIFO filled up mid-stream)
+            // Wind back our delay values slightly or sleep briefly to allow hardware catch-up
             usleep(500);
+        } else {
+            // A successful full burst write occurred. 
+            // Yield slightly to prevent hogging 100% of user CPU core processing cycles
+            usleep(100);
         }
     }
 
-    printf("\n[-] Ctrl-C recognized. Cleaning up allocations and closing mapping...\n");
-    munmap((void*)fifo_regs, MAP_SIZE);
+    printf("\n[-] Ctrl-C recognized. Closing device node...\n");
     close(fd);
-    printf("[+] Done. Stepper motor controller stopped cleanly.\n");
+    printf("[+] Done. Stepper driver testing completed cleanly.\n");
 
     return EXIT_SUCCESS;
 }
