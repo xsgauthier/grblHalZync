@@ -58,6 +58,8 @@ static void platform_restore_terminal(void)
 void platform_terminate()
 {
     platform_restore_terminal();
+    fprintf(stderr, "\nRequesting IO Thread exit...\n");
+    mcu_terminate_io_thread();
 }
 
 
