@@ -60,6 +60,7 @@ int main() {
     while (keep_running) {
         // Read how many free slots currently exist inside the Xilinx FIFO buffer
         uint32_t vacancy = fifo_regs[REG_TDFV];
+        printf("[+] FIFO Vacancy: %u slots available\n", vacancy);
 
         if (vacancy > 10) { 
             // Calculate a burst packet size to send to the FIFO
