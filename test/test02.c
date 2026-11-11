@@ -84,6 +84,7 @@ int main() {
         if (bytes_sent < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // The driver's internal queue buffer is saturated, sleep briefly and retry
+                printf("[*] FIFO buffer full, waiting for hardware to catch up...\n");
                 usleep(1000);
             } else if (errno == EINTR) {
                 // Interrupted by Ctrl-C signal
@@ -95,11 +96,13 @@ int main() {
         } else if (bytes_sent < (BURST_SIZE_WORDS * sizeof(uint32_t))) {
             // Partial write occurred (FIFO filled up mid-stream)
             // Wind back our delay values slightly or sleep briefly to allow hardware catch-up
+            printf("[*] Partial write occurred, allowing hardware to catch up...\n");
             usleep(500);
         } else {
             // A successful full burst write occurred. 
             // Yield slightly to prevent hogging 100% of user CPU core processing cycles
-            usleep(100);
+            printf("[*] Full burst write completed successfully.\n");
+            usleep(10);
         }
     }
 
