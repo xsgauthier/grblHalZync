@@ -64,8 +64,14 @@ int main(int argc, char *argv[]) {
     uint32_t ier  = fifo_reg[XLLF_IER_OFFSET / 4];
     uint32_t tdfv = fifo_reg[XLLF_TDFV_OFFSET / 4];
     uint32_t rdfo = fifo_reg[XLLF_RDFO_OFFSET / 4]; 
-    uint32_t rlr  = fifo_reg[XLLF_RLR_OFFSET / 4];  
+    uint32_t rlr  = 0;
 
+    // ONLY read RLR if there is actually a packet waiting to be processed!
+    if (rdfo > 0) {
+        rlr = fifo_reg[XLLF_RLR_OFFSET / 4];
+    } else {
+        printf("  -> RDFO is 0. Skipping RLR read to prevent External Abort crash.\n");
+    }
     printf("[RAW REGISTER DUMP]\n");
     printf("  ISR  (0x00): 0x%08X\n", isr);
     printf("  IER  (0x04): 0x%08X\n", ier);
