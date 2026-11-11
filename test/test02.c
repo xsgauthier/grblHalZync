@@ -12,7 +12,7 @@
 
 // Adjust these based on your FIFO depth (e.g. 512, 1024 words)
 // Writing in controlled bursts prevents blocking the OS thread indefinitely
-#define BURST_SIZE_WORDS     1024  
+#define BURST_SIZE_WORDS     64  
 
 // Stepper Ramp Configurations
 #define MIN_DELAY_CYCLES     500       // Top Speed (~200 kHz at 100MHz clock)
