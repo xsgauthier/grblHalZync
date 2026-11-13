@@ -61,6 +61,14 @@ int main(int argc, char *argv[]) {
     printf("  Target Physical Base Address: 0x%08lX\n", (unsigned long)phys_addr);
     printf("==================================================\n\n");
 
+    // ----------------------------------------------------
+    // CRITICAL FIX: Perform Software Reset on TX and RX FIFOs
+    // ----------------------------------------------------
+    printf("[0] Issuing software reset to TX and RDFR registers...\n");
+    fifo_reg[XLLF_TDFR_OFFSET / 4] = 0x000000A5; // Reset Transmit FIFO
+    fifo_reg[XLLF_RDFR_OFFSET / 4] = 0x000000A5; // Reset Receive FIFO
+    usleep(10000); // Allow pointers to clear (10ms)
+    
     // Define test data pattern to transmit
     uint32_t tx_data[] = {0xDEADBEEF, 0x12345678, 0xCAFEBABE, 0x87654321};
     int num_words = sizeof(tx_data) / sizeof(tx_data[0]);
