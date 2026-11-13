@@ -117,7 +117,7 @@ int main(int argc, char *argv[]) {
 
     // Poll for Receive Complete (RC) in ISR since it's an internal loopback
     printf("[4] Waiting for loopback packet completion...\n");
-    int timeout = 1000000;
+    timeout = 1000000;
     while (--timeout > 0) {
         uint32_t isr = fifo_reg[XLLF_ISR_OFFSET / 4];
         if (isr & XLLF_INT_RC_MASK) {
