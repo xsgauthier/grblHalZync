@@ -25,6 +25,10 @@
 #define XLLF_INT_RPURE_MASK 0x01000000 // Receive Under Read Error
 #define XLLF_INT_RPORE_MASK 0x02000000 // Receive Over Read Error
 
+// Define reset completion bitmasks
+#define XLLF_INT_TRC_MASK 0x01000000  // Transmit Reset Complete
+#define XLLF_INT_RRC_MASK 0x00800000  // Receive Reset Complete
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <AXI_FIFO_PHYSICAL_BASE_ADDRESS>\n", argv[0]);
@@ -61,13 +65,29 @@ int main(int argc, char *argv[]) {
     printf("  Target Physical Base Address: 0x%08lX\n", (unsigned long)phys_addr);
     printf("==================================================\n\n");
 
-    // ----------------------------------------------------
-    // CRITICAL FIX: Perform Software Reset on TX and RX FIFOs
-    // ----------------------------------------------------
-    printf("[0] Issuing software reset to TX and RDFR registers...\n");
-    fifo_reg[XLLF_TDFR_OFFSET / 4] = 0x000000A5; // Reset Transmit FIFO
-    fifo_reg[XLLF_RDFR_OFFSET / 4] = 0x000000A5; // Reset Receive FIFO
-    usleep(10000); // Allow pointers to clear (10ms)
+    // 1. Issue software reset to TX and RX FIFOs
+    fifo_reg[XLLF_TDFR_OFFSET / 4] = 0x000000A5;
+    fifo_reg[XLLF_RDFR_OFFSET / 4] = 0x000000A5;
+
+    // 2. Poll ISR until reset complete flags assert
+    int timeout = 100000;
+    while (--timeout > 0) {
+        uint32_t isr = fifo_reg[XLLF_ISR_OFFSET / 4];
+        if ((isr & XLLF_INT_TRC_MASK) && (isr & XLLF_INT_RRC_MASK)) {
+            // Clear the completion flags by writing 1 back to them
+            fifo_reg[XLLF_ISR_OFFSET / 4] = isr & (XLLF_INT_TRC_MASK | XLLF_INT_RRC_MASK);
+            break;
+        }
+    }
+
+    if (timeout <= 0) {
+        fprintf(stderr, "❌ Error: Timeout waiting for FIFO reset completion.\n");
+        munmap(map_base, pagesize);
+        close(fd);
+        return EXIT_FAILURE;
+    }
+
+    printf("[0] FIFO reset completed successfully.\n");
     
     // Define test data pattern to transmit
     uint32_t tx_data[] = {0xDEADBEEF, 0x12345678, 0xCAFEBABE, 0x87654321};
