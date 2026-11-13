@@ -51,6 +51,7 @@ int main(int argc, char *argv[]) {
 
     // Step 2: Poll Interrupt Status Register (ISR) for Transmit and Receive Reset Complete flags
     printf("[2] Waiting for reset completion flags in ISR...\n");
+    sleep(1); // Optional: small delay to allow hardware to process reset
     int timeout = 100000;
     int reset_ok = 0;
     
