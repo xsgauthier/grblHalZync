@@ -17,7 +17,16 @@
 // Stepper Ramp Configurations
 #define MIN_DELAY_CYCLES     500       // Top Speed (~200 kHz at 100MHz clock)
 #define MAX_DELAY_CYCLES     500000      // Bottom Starting Speed (~200 Hz)
-#define STEP_INCREMENT       1500        // Acceleration / Deceleration slope smoothness
+#define STEP_INCREMENT       500        // Acceleration / Deceleration slope smoothness
+
+#define DELAY_BITS 30
+#define DELAY_MASK ((1 << DELAY_BITS)-1)
+
+#define DIRECTION_BIT 31
+#define DIRECTION_MASK (1 << DIRECTION_BIT)
+
+#define ENABLE_BIT 30
+#define ENABLE_MASK (1 << ENABLE_BIT)
 
 volatile sig_atomic_t keep_running = 1;
 
@@ -53,9 +62,9 @@ int main() {
         // Construct a batch of step data words inside our stack array
         for (int i = 0; i < BURST_SIZE_WORDS; i++) {
             // Pack our control word: Bit 31 = DIR pin, Bits 30-0 = Delay count
-            uint32_t packed_word = (current_delay & 0x7FFFFFFF);
+            uint32_t packed_word = (current_delay & DELAY_MASK);
             if (direction) {
-                packed_word |= (1U << 31);
+                packed_word |= DIRECTION_MASK;
             }
 
             write_buffer[i] = packed_word;
