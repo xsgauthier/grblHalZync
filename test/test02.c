@@ -19,7 +19,7 @@
 #define MIN_DELAY_CYCLES     250       // Top Speed
 #define MAX_DELAY_CYCLES     500000      // Bottom Starting Speed
 #define STEP_INCREMENT       500        // Acceleration / Deceleration slope smoothness
-#define TOP_SPEED_HOLD_TIME_SEC 2        // Hold top speed for this many seconds before decelerating
+#define TOP_SPEED_HOLD_TIME_SEC 5        // Hold top speed for this many seconds before decelerating
 
 #define DELAY_BITS 30
 #define DELAY_MASK ((1 << DELAY_BITS)-1)
@@ -82,13 +82,9 @@ int main() {
                     top_speed_start_time = time(NULL); // Start the top speed hold timer
                 }
             } else if (accelerating == 0) {
-                if (top_speed_start_time == 0) {
-                    top_speed_start_time = time(NULL);
-                } else {
-                    time_t current_time = time(NULL);
-                    if ((current_time - top_speed_start_time) >= TOP_SPEED_HOLD_TIME_SEC) {
-                        accelerating = -1; // Start decelerating
-                    }
+                time_t current_time = time(NULL);
+                if ((current_time - top_speed_start_time) > TOP_SPEED_HOLD_TIME_SEC) {
+                    accelerating = -1; // Start decelerating
                 }
             } else if (accelerating == -1) {
                 if (current_delay < (MAX_DELAY_CYCLES - STEP_INCREMENT)) {
