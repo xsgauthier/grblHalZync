@@ -16,7 +16,7 @@
 #define BURST_SIZE_WORDS     64  
 
 // Stepper Ramp Configurations
-#define MIN_DELAY_CYCLES     250+500+1   // Top Speed
+#define MIN_DELAY_CYCLES     250+500+2   // Top Speed
 #define MAX_DELAY_CYCLES     500000      // Bottom Starting Speed
 #define STEP_INCREMENT       500         // Acceleration / Deceleration slope smoothness
 #define TOP_SPEED_HOLD_TIME_SEC 5        // Hold top speed for this many seconds before decelerating
@@ -66,7 +66,7 @@ int main() {
         for (int i = 0; i < BURST_SIZE_WORDS; i++) {
             // Pack our control word: Bit 31 = DIR pin, Bits 30-0 = Delay count
             uint32_t packed_word = (current_delay & DELAY_MASK);
-            printf("[*] Packed word: 0x%08X (Delay: %u, Direction: %s)\n", packed_word, current_delay, direction ? "CW" : "CCW");
+            //printf("[*] Packed word: 0x%08X (Delay: %u, Direction: %s)\n", packed_word, current_delay, direction ? "CW" : "CCW");
             if (direction) {
                 packed_word |= DIRECTION_MASK;
             }
