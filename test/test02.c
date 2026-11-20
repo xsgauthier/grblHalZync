@@ -15,9 +15,10 @@
 #define BURST_SIZE_WORDS     64  
 
 // Stepper Ramp Configurations
-#define MIN_DELAY_CYCLES     500       // Top Speed (~200 kHz at 100MHz clock)
-#define MAX_DELAY_CYCLES     500000      // Bottom Starting Speed (~200 Hz)
+#define MIN_DELAY_CYCLES     250       // Top Speed
+#define MAX_DELAY_CYCLES     500000      // Bottom Starting Speed
 #define STEP_INCREMENT       500        // Acceleration / Deceleration slope smoothness
+#define TOP_SPEED_HOLD_TIME_SEC 2        // Hold top speed for this many seconds before decelerating
 
 #define DELAY_BITS 30
 #define DELAY_MASK ((1 << DELAY_BITS)-1)
@@ -55,6 +56,7 @@ int main() {
     uint32_t current_delay = MAX_DELAY_CYCLES;
     int accelerating = 1;  // 1 = Speeding up (decreasing delay), 0 = Slowing down
     uint8_t direction = 1; // 1 = Clockwise (Bit 31 High), 0 = Counter-Clockwise (Bit 31 Low)
+    time_t top_speed_start_time = 0;
 
     printf("[+] Starting continuous Step/Dir driver ramp pipeline. Press CTRL-C to exit safely.\n");
 
@@ -71,13 +73,23 @@ int main() {
             write_buffer[i] = packed_word;
 
             // Process the acceleration/deceleration triangle logic math
-            if (accelerating) {
+            if (accelerating == 1) {
                 if (current_delay > (MIN_DELAY_CYCLES + STEP_INCREMENT)) {
                     current_delay -= STEP_INCREMENT; // Speed up
                 } else {
                     accelerating = 0; // Hit top speed inflection point
+                    top_speed_start_time = time(NULL); // Start the top speed hold timer
                 }
-            } else {
+            } else if (accelerating == 0) {
+                if (top_speed_start_time == 0) {
+                    top_speed_start_time = time(NULL);
+                } else {
+                    time_t current_time = time(NULL);
+                    if ((current_time - top_speed_start_time) >= TOP_SPEED_HOLD_TIME_SEC) {
+                        accelerating = -1; // Start decelerating
+                    }
+                }
+            } else if (accelerating == -1) {
                 if (current_delay < (MAX_DELAY_CYCLES - STEP_INCREMENT)) {
                     current_delay += STEP_INCREMENT; // Slow down
                 } else {
@@ -111,8 +123,8 @@ int main() {
         } else {
             // A successful full burst write occurred. 
             // Yield slightly to prevent hogging 100% of user CPU core processing cycles
-            printf("[*] Full burst write completed successfully.\n");
-            usleep(10);
+            // printf("[*] Full burst write completed successfully.\n");
+            usleep(1);
         }
     }
 
