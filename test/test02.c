@@ -16,7 +16,7 @@
 #define BURST_SIZE_WORDS     64  
 
 // Stepper Ramp Configurations
-#define MIN_DELAY_CYCLES     2500   // Top Speed, 10000 => 5khz Step Rate
+#define MIN_DELAY_CYCLES     5000   // Top Speed, 10000 => 5khz Step Rate
 #define MAX_DELAY_CYCLES     500000      // Bottom Starting Speed
 #define STEP_INCREMENT       500         // Acceleration / Deceleration slope smoothness
 #define TOP_SPEED_HOLD_TIME_SEC 5        // Hold top speed for this many seconds before decelerating
