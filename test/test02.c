@@ -66,6 +66,7 @@ int main() {
             if (direction) {
                 packed_word |= DIRECTION_MASK;
             }
+            packed_word |= ENABLE_MASK; // Always enable the stepper driver for this test
 
             write_buffer[i] = packed_word;
 
