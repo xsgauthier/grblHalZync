@@ -80,6 +80,7 @@ int main() {
                 } else {
                     accelerating = 0; // Hit top speed inflection point
                     top_speed_start_time = time(NULL); // Start the top speed hold timer
+                    current_delay = MIN_DELAY_CYCLES; // Ensure we don't go below minimum delay
                 }
             } else if (accelerating == 0) {
                 time_t current_time = time(NULL);
@@ -92,6 +93,7 @@ int main() {
                 } else {
                     accelerating = 1; // Hit bottom speed inflection point
                     direction = !direction; // Flip physical motor direction state on every ramp reset
+                    current_delay = MAX_DELAY_CYCLES; // Ensure we don't go above maximum delay
                 }
             }
         }
