@@ -7,6 +7,8 @@
 #include <signal.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/types.h>
+#include <stddef.h>
 
 // Adjust this path string to match your exact device node name on Debian
 #define AXIS_FIFO_DEV_PATH   "/dev/axis_fifo0" 
