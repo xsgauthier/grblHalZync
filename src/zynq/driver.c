@@ -501,10 +501,10 @@ bool driver_init ()
     hal.probe.configure = probeConfigureInvertMask;
 
     static const spindle_ptrs_t spindle = {
-        .type = SpindleType_PWM,
-        .cap.variable = On,
-        .cap.laser = On,
-        .cap.direction = On,
+        .type = SpindleType_Basic,
+        .cap.variable = Off,
+        .cap.laser = Off,
+        .cap.direction = Off,
         .config = spindleConfig,
         .get_pwm = spindleGetPWM,
         .update_pwm = spindle_set_speed,

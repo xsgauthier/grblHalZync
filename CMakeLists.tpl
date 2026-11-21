@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(grblHAL-sim C)
 
-add_compile_definitions(F_CPU=16000000)
+add_compile_definitions(F_CPU=50000000)
 #add_compile_definitions(SQUARING_ENABLED=1)
 
 %build_flags%

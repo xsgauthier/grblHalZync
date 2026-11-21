@@ -13,7 +13,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wno-discarded-qualifiers)
 endif()
 
-add_compile_definitions(F_CPU=25000000)
+add_compile_definitions(F_CPU=50000000)
 #add_compile_definitions(SQUARING_ENABLED=1)
 
 # add compile deficnitions REAL_IS_DOUBLE if 64 bit os target is detected. This is needed for the simulator to work correctly on 64 bit systems.
