@@ -13,7 +13,7 @@
 #define AXIS_FIFO_DEV_PATH "/dev/axis_fifo0"
 
 #define BURST_SIZE_WORDS 256
-#define MIN_DELAY_CYCLES 5000
+#define MIN_DELAY_CYCLES 3000
 #define CIRCLE_RADIUS_STEPS 10000
 
 // Direction and enable fields are ordered Z/Y/X; this test drives X and Y.
