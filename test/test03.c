@@ -77,7 +77,7 @@ static int flush_words(int fd, uint32_t *buffer, size_t *count)
 
 static int queue_word(int fd, uint32_t *buffer, size_t *count,
                       int x_delta, int y_delta, double delay_cycles,
-                      uint32_t *direction_bits)
+                      int *x_direction, int *y_direction)
 {
     if (x_delta == 0 && y_delta == 0)
         return 0;
@@ -94,20 +94,23 @@ static int queue_word(int fd, uint32_t *buffer, size_t *count,
 
     uint32_t word = delay & DELAY_MASK;
     if (x_delta > 0)
-        *direction_bits |= X_DIRECTION_MASK;
+        *x_direction = 1;
     else if (x_delta < 0)
-        *direction_bits &= ~X_DIRECTION_MASK;
+        *x_direction = 0;
     if (x_delta != 0) {
         word |= X_ENABLE_MASK;
     }
     if (y_delta > 0)
-        *direction_bits |= Y_DIRECTION_MASK;
+        *y_direction = 1;
     else if (y_delta < 0)
-        *direction_bits &= ~Y_DIRECTION_MASK;
+        *y_direction = 0;
     if (y_delta != 0) {
         word |= Y_ENABLE_MASK;
     }
-    word |= *direction_bits;
+    if (*x_direction)
+        word |= X_DIRECTION_MASK;
+    if (*y_direction)
+        word |= Y_DIRECTION_MASK;
 
     buffer[(*count)++] = word;
     if (*count == BURST_SIZE_WORDS)
@@ -118,7 +121,8 @@ static int queue_word(int fd, uint32_t *buffer, size_t *count,
 int main(void)
 {
     uint32_t buffer[BURST_SIZE_WORDS];
-    uint32_t direction_bits = 0;
+    int x_direction = 0;
+    int y_direction = 0;
     size_t count = 0;
     int fd;
     int result = EXIT_SUCCESS;
@@ -164,7 +168,7 @@ int main(void)
                     angle_delta += two_pi;
                 result = queue_word(fd, buffer, &count, x_delta, y_delta,
                                     angle_delta * radius * MIN_DELAY_CYCLES,
-                                    &direction_bits);
+                                    &x_direction, &y_direction);
                 last_step_angle = angle;
                 if (result != 0)
                     break;
