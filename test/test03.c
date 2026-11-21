@@ -10,19 +10,19 @@
 #include <time.h>
 #include <unistd.h>
 
-#define AXIS_X_FIFO_DEV_PATH "/dev/axis_fifo0"
-#define AXIS_Y_FIFO_DEV_PATH "/dev/axis_fifo1"
+#define AXIS_FIFO_DEV_PATH "/dev/axis_fifo0"
 
-#define BURST_SIZE_WORDS 64
+#define BURST_SIZE_WORDS 256
 #define MIN_DELAY_CYCLES 5000
-#define CIRCLE_RADIUS_STEPS 1000
+#define CIRCLE_RADIUS_STEPS 10000
 
-#define DELAY_BITS 30
+// Direction and enable fields are ordered Z/Y/X; this test drives X and Y.
+#define X_DIRECTION_MASK (1U << 29)
+#define Y_DIRECTION_MASK (1U << 30)
+#define X_ENABLE_MASK (1U << 26)
+#define Y_ENABLE_MASK (1U << 27)
+#define DELAY_BITS 26
 #define DELAY_MASK ((1U << DELAY_BITS) - 1U)
-#define DIRECTION_BIT 31
-#define DIRECTION_MASK (1U << DIRECTION_BIT)
-#define ENABLE_BIT 30
-#define ENABLE_MASK (1U << ENABLE_BIT)
 
 static volatile sig_atomic_t keep_running = 1;
 
@@ -75,12 +75,12 @@ static int flush_words(int fd, uint32_t *buffer, size_t *count)
     return result;
 }
 
-static int queue_step(int fd, uint32_t *buffer, size_t *count,
-                      int step_delta, double delay_cycles)
+static int queue_word(int fd, uint32_t *buffer, size_t *count,
+                      int x_delta, int y_delta, double delay_cycles)
 {
-    if (step_delta == 0)
+    if (x_delta == 0 && y_delta == 0)
         return 0;
-    if (step_delta < -1 || step_delta > 1 ||
+    if (x_delta < -1 || x_delta > 1 || y_delta < -1 || y_delta > 1 ||
         !isfinite(delay_cycles) || delay_cycles < 0.0 ||
         delay_cycles > DELAY_MASK) {
         fprintf(stderr, "[-] Circle step or delay is outside the FIFO format.\n");
@@ -91,9 +91,17 @@ static int queue_step(int fd, uint32_t *buffer, size_t *count,
     if (delay == 0)
         delay = 1;
 
-    uint32_t word = (delay & DELAY_MASK) | ENABLE_MASK;
-    if (step_delta > 0)
-        word |= DIRECTION_MASK;
+    uint32_t word = delay & DELAY_MASK;
+    if (x_delta != 0) {
+        word |= X_ENABLE_MASK;
+        if (x_delta > 0)
+            word |= X_DIRECTION_MASK;
+    }
+    if (y_delta != 0) {
+        word |= Y_ENABLE_MASK;
+        if (y_delta > 0)
+            word |= Y_DIRECTION_MASK;
+    }
 
     buffer[(*count)++] = word;
     if (*count == BURST_SIZE_WORDS)
@@ -103,35 +111,23 @@ static int queue_step(int fd, uint32_t *buffer, size_t *count,
 
 int main(void)
 {
-    uint32_t x_buffer[BURST_SIZE_WORDS];
-    uint32_t y_buffer[BURST_SIZE_WORDS];
-    size_t x_count = 0;
-    size_t y_count = 0;
-    int x_fd;
-    int y_fd;
+    uint32_t buffer[BURST_SIZE_WORDS];
+    size_t count = 0;
+    int fd;
     int result = EXIT_SUCCESS;
     const double radius = CIRCLE_RADIUS_STEPS;
     const double two_pi = 2.0 * acos(-1.0);
     const size_t sample_count = (size_t)ceil(4.0 * two_pi * radius);
-    double x_last_step_angle = 0.0;
-    double y_last_step_angle = 0.0;
+    double last_step_angle = 0.0;
     long x_position = lround(radius);
     long y_position = 0;
 
     signal(SIGINT, handle_sigint);
 
-    printf("[+] Opening X axis FIFO: %s...\n", AXIS_X_FIFO_DEV_PATH);
-    x_fd = open(AXIS_X_FIFO_DEV_PATH, O_WRONLY);
-    if (x_fd < 0) {
-        perror("[-] Failed to open X axis FIFO");
-        return EXIT_FAILURE;
-    }
-
-    printf("[+] Opening Y axis FIFO: %s...\n", AXIS_Y_FIFO_DEV_PATH);
-    y_fd = open(AXIS_Y_FIFO_DEV_PATH, O_WRONLY);
-    if (y_fd < 0) {
-        perror("[-] Failed to open Y axis FIFO");
-        close(x_fd);
+    printf("[+] Opening axis FIFO: %s...\n", AXIS_FIFO_DEV_PATH);
+    fd = open(AXIS_FIFO_DEV_PATH, O_WRONLY);
+    if (fd < 0) {
+        perror("[-] Failed to open axis FIFO");
         return EXIT_FAILURE;
     }
 
@@ -155,36 +151,23 @@ int main(void)
             int x_delta = (int)(next_x - x_position);
             int y_delta = (int)(next_y - y_position);
 
-            if (x_delta != 0) {
-                double angle_delta = angle - x_last_step_angle;
+            if (x_delta != 0 || y_delta != 0) {
+                double angle_delta = angle - last_step_angle;
                 if (angle_delta <= 0.0)
                     angle_delta += two_pi;
-                result = queue_step(x_fd, x_buffer, &x_count, x_delta,
+                result = queue_word(fd, buffer, &count, x_delta, y_delta,
                                     angle_delta * radius * MIN_DELAY_CYCLES);
-                x_last_step_angle = angle;
+                last_step_angle = angle;
+                if (result != 0)
+                    break;
             }
-            if (result != 0)
-                break;
-
-            if (y_delta != 0) {
-                double angle_delta = angle - y_last_step_angle;
-                if (angle_delta <= 0.0)
-                    angle_delta += two_pi;
-                result = queue_step(y_fd, y_buffer, &y_count, y_delta,
-                                    angle_delta * radius * MIN_DELAY_CYCLES);
-                y_last_step_angle = angle;
-            }
-            if (result != 0)
-                break;
 
             x_position = next_x;
             y_position = next_y;
         }
 
         if (result == EXIT_SUCCESS && keep_running) {
-            result = flush_words(x_fd, x_buffer, &x_count);
-            if (result == 0)
-                result = flush_words(y_fd, y_buffer, &y_count);
+            result = flush_words(fd, buffer, &count);
         }
     }
 
@@ -194,10 +177,7 @@ int main(void)
 
     if (result == EXIT_SUCCESS) {
         if (!interrupted_write) {
-            int flush_result = flush_words(x_fd, x_buffer, &x_count);
-            if (flush_result < 0)
-                result = EXIT_FAILURE;
-            flush_result = flush_words(y_fd, y_buffer, &y_count);
+            int flush_result = flush_words(fd, buffer, &count);
             if (flush_result < 0)
                 result = EXIT_FAILURE;
         }
@@ -205,8 +185,7 @@ int main(void)
         result = EXIT_FAILURE;
     }
 
-    printf("\n[-] Stopping circle stream and closing FIFO devices.\n");
-    close(y_fd);
-    close(x_fd);
+    printf("\n[-] Stopping circle stream and closing FIFO device.\n");
+    close(fd);
     return result;
 }
