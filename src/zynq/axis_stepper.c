@@ -17,6 +17,7 @@
 #define AXIS_FIFO_WRITE_BATCH 64
 #define AXIS_FIFO_RETRY_DELAY_NS 10000000L
 #define AXIS_DIAGNOSTIC_INTERVAL_NS 1000000000ULL
+#define AXIS_DIAGNOSTIC_WAIT_NS 100000000L
 
 #define DELAY_BITS 26
 #define DELAY_MASK ((1U << DELAY_BITS) - 1U)
@@ -48,8 +49,14 @@ struct axis_stepper_s {
     uint64_t diagnostic_fifo_eagain;
     uint64_t diagnostic_fifo_wait_ns;
     uint64_t diagnostic_fifo_wait_max_ns;
+    uint64_t diagnostic_fifo_write_calls;
+    uint64_t diagnostic_fifo_write_ns;
+    uint64_t diagnostic_fifo_write_max_ns;
+    uint64_t diagnostic_fifo_slow_writes;
     uint64_t diagnostic_write_errors;
     size_t diagnostic_queue_high_water;
+    uint64_t writer_syscall_started_ns;
+    int writer_syscall_active;
 };
 
 static uint64_t monotonic_time_ns(void)
@@ -67,7 +74,10 @@ static void report_diagnostics(p_axis_stepper_t handle)
     uint64_t now = monotonic_time_ns();
     uint64_t elapsed_ns, words_written, producer_waits, producer_wait_ns;
     uint64_t producer_wait_max_ns, fifo_eagain, fifo_wait_ns, fifo_wait_max_ns;
+    uint64_t fifo_write_calls, fifo_write_ns, fifo_write_max_ns, fifo_slow_writes;
     uint64_t write_errors;
+    uint64_t writer_active_ns;
+    int writer_active;
     size_t queue_count, queue_high_water;
 
     pthread_mutex_lock(&handle->mutex);
@@ -85,9 +95,15 @@ static void report_diagnostics(p_axis_stepper_t handle)
     fifo_eagain = handle->diagnostic_fifo_eagain;
     fifo_wait_ns = handle->diagnostic_fifo_wait_ns;
     fifo_wait_max_ns = handle->diagnostic_fifo_wait_max_ns;
+    fifo_write_calls = handle->diagnostic_fifo_write_calls;
+    fifo_write_ns = handle->diagnostic_fifo_write_ns;
+    fifo_write_max_ns = handle->diagnostic_fifo_write_max_ns;
+    fifo_slow_writes = handle->diagnostic_fifo_slow_writes;
     write_errors = handle->diagnostic_write_errors;
     queue_count = handle->count;
     queue_high_water = handle->diagnostic_queue_high_water;
+    writer_active = handle->writer_syscall_active;
+    writer_active_ns = writer_active ? now - handle->writer_syscall_started_ns : 0;
 
     handle->diagnostic_words_written = 0;
     handle->diagnostic_producer_waits = 0;
@@ -96,13 +112,17 @@ static void report_diagnostics(p_axis_stepper_t handle)
     handle->diagnostic_fifo_eagain = 0;
     handle->diagnostic_fifo_wait_ns = 0;
     handle->diagnostic_fifo_wait_max_ns = 0;
+    handle->diagnostic_fifo_write_calls = 0;
+    handle->diagnostic_fifo_write_ns = 0;
+    handle->diagnostic_fifo_write_max_ns = 0;
+    handle->diagnostic_fifo_slow_writes = 0;
     handle->diagnostic_write_errors = 0;
     handle->diagnostic_queue_high_water = handle->count;
     pthread_mutex_unlock(&handle->mutex);
 
-    if (words_written || producer_waits || fifo_eagain || write_errors) {
+    if (words_written || producer_waits || fifo_eagain || fifo_write_calls || write_errors) {
         logger_fprintf(stderr,
-                       "[stepper] q=%zu/%u high=%zu words=%llu producer_waits=%llu producer_wait_ms=%llu producer_wait_max_ms=%llu fifo_eagain=%llu fifo_wait_ms=%llu fifo_wait_max_ms=%llu errors=%llu\n",
+                       "[stepper] q=%zu/%u high=%zu words=%llu producer_waits=%llu producer_wait_ms=%llu producer_wait_max_ms=%llu fifo_eagain=%llu fifo_wait_ms=%llu fifo_wait_max_ms=%llu write_calls=%llu write_ms=%llu write_max_ms=%llu write_slow=%llu writer_active_ms=%llu errors=%llu\n",
                        queue_count, AXIS_STEP_QUEUE_CAPACITY, queue_high_water,
                        (unsigned long long)words_written,
                        (unsigned long long)producer_waits,
@@ -111,6 +131,11 @@ static void report_diagnostics(p_axis_stepper_t handle)
                        (unsigned long long)fifo_eagain,
                        (unsigned long long)(fifo_wait_ns / 1000000ULL),
                        (unsigned long long)(fifo_wait_max_ns / 1000000ULL),
+                       (unsigned long long)fifo_write_calls,
+                       (unsigned long long)(fifo_write_ns / 1000000ULL),
+                       (unsigned long long)(fifo_write_max_ns / 1000000ULL),
+                       (unsigned long long)fifo_slow_writes,
+                       (unsigned long long)(writer_active_ns / 1000000ULL),
                        (unsigned long long)write_errors);
     }
 }
@@ -129,7 +154,24 @@ static void write_all(p_axis_stepper_t handle, const uint32_t *words, size_t cou
     size_t bytes_remaining = count * sizeof(*words);
 
     while (bytes_remaining > 0) {
+        uint64_t write_started_ns = monotonic_time_ns();
+        pthread_mutex_lock(&handle->mutex);
+        handle->writer_syscall_started_ns = write_started_ns;
+        handle->writer_syscall_active = 1;
+        pthread_mutex_unlock(&handle->mutex);
+
         ssize_t bytes_written = write(handle->fd, data, bytes_remaining);
+        uint64_t write_ns = monotonic_time_ns() - write_started_ns;
+
+        pthread_mutex_lock(&handle->mutex);
+        handle->writer_syscall_active = 0;
+        handle->diagnostic_fifo_write_calls++;
+        handle->diagnostic_fifo_write_ns += write_ns;
+        if (write_ns > handle->diagnostic_fifo_write_max_ns)
+            handle->diagnostic_fifo_write_max_ns = write_ns;
+        if (write_ns >= 1000000ULL)
+            handle->diagnostic_fifo_slow_writes++;
+        pthread_mutex_unlock(&handle->mutex);
 
         if (bytes_written > 0) {
             data += bytes_written;
@@ -199,8 +241,24 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
     if (handle->count == AXIS_STEP_QUEUE_CAPACITY)
         handle->diagnostic_producer_waits++;
     uint64_t wait_started_ns = handle->count == AXIS_STEP_QUEUE_CAPACITY ? monotonic_time_ns() : 0;
-    while (handle->count == AXIS_STEP_QUEUE_CAPACITY && !handle->stopping)
-        pthread_cond_wait(&handle->space_ready, &handle->mutex);
+    while (handle->count == AXIS_STEP_QUEUE_CAPACITY && !handle->stopping) {
+        struct timespec deadline;
+
+        if (clock_gettime(CLOCK_REALTIME, &deadline) == 0) {
+            deadline.tv_nsec += AXIS_DIAGNOSTIC_WAIT_NS;
+            if (deadline.tv_nsec >= 1000000000L) {
+                deadline.tv_sec++;
+                deadline.tv_nsec -= 1000000000L;
+            }
+            if (pthread_cond_timedwait(&handle->space_ready, &handle->mutex, &deadline) == ETIMEDOUT) {
+                pthread_mutex_unlock(&handle->mutex);
+                report_diagnostics(handle);
+                pthread_mutex_lock(&handle->mutex);
+            }
+        } else {
+            pthread_cond_wait(&handle->space_ready, &handle->mutex);
+        }
+    }
 
     if (wait_started_ns) {
         uint64_t wait_ns = monotonic_time_ns() - wait_started_ns;
