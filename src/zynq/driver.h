@@ -38,37 +38,47 @@
 
 #define STEPPER_TIMER 0
 
-#define LIMITS_PORT0 0
+// Step and dir are combined into one axis_fifo word.
+#define STEP_PORT    0
+#define DIR_PORT     1
+
+#define X_STEP_PIN 0
+#define Y_STEP_PIN 1
+#define Z_STEP_PIN 2
+#define X_DIRECTION_PIN 0
+#define Y_DIRECTION_PIN 1
+#define Z_DIRECTION_PIN 2
+
+// Limit switches LIMITS_PORT1 is used only when SQUARING_ENABLED
+
+#define LIMITS_PORT0 2
 #define LIMITS_IRQ0  portINT(LIMITS_PORT0)
-#define LIMITS_PORT1 0
+#define LIMITS_PORT1 3
 #define LIMITS_IRQ1  portINT(LIMITS_PORT1)
 
-#define SPINDLE_PORT 0
-#define COOLANT_PORT 0
-#define STEP_PORT0   0
-#define STEP_PORT1   0
-#define DIR_PORT     0
-#define STEPPER_ENABLE_PORT 0
+//#define X_LIMIT_PIN         7
+//#define Y_LIMIT_PIN         8
+//#define Z_LIMIT_PIN         9
 
-/* Output pins */
-#define SPINDLE_ENABLE_PIN 0
-#define SPINDLE_DIRECTION_PIN 1
-#define COOLANT_FLOOD_PIN 2
-#define COOLANT_MIST_PIN 3
-#define X_STEP_PIN 4
-#define Y_STEP_PIN 5
-#define Z_STEP_PIN 6
-#define X_DIRECTION_PIN 7
-#define Y_DIRECTION_PIN 8
-#define Z_DIRECTION_PIN 9
-#define X_ENABLE_PIN 10
-#define Y_ENABLE_PIN 11
-#define Z_ENABLE_PIN 12
+// Driver enable , coolant and spindle
+#define SPINDLE_PORT 4
+#define COOLANT_PORT 4
+#define STEPPER_ENABLE_PORT 4
 
-#define SPINDLE_MASK 0x03
-#define COOLANT_MASK 0x03
+#define X_ENABLE_PIN 0
+#define Y_ENABLE_PIN 1
+#define Z_ENABLE_PIN 2
+#define SPINDLE_ENABLE_PIN 12
+#define SPINDLE_DIRECTION_PIN 13
+#define COOLANT_FLOOD_PIN 14
+#define COOLANT_MIST_PIN 15
 
-#define CONTROL_PORT        0
+#define SPINDLE_MASK ((1<<SPINDLE_ENABLE_PIN)|(1<<SPINDLE_DIRECTION_PIN))
+#define COOLANT_MASK ((1<<COOLANT_FLOOD_PIN)|(1<<COOLANT_MIST_PIN))
+
+// Controls
+
+#define CONTROL_PORT        5
 #define CONTROL_IRQ         portINT(CONTROL_PORT)
 
 /* Input pins */
@@ -77,20 +87,19 @@
 #define CYCLE_START_PIN     2
 #define SAFETY_DOOR_PIN     3
 #define ESTOP_PIN           4
-#define PROBE_PIN           5
-#define PROBE_CONNECTED_PIN 6
-#define X_LIMIT_PIN         7
-#define Y_LIMIT_PIN         8
-#define Z_LIMIT_PIN         9
 
 #define RESET_BIT           (1<<RESET_PIN)
 #define FEED_HOLD_BIT       (1<<FEED_HOLD_PIN)
 #define CYCLE_START_BIT     (1<<CYCLE_START_PIN)
 #define SAFETY_DOOR_BIT     (1<<SAFETY_DOOR_PIN)
 #define ESTOP_BIT           (1<<ESTOP_PIN)
-#define CONTROL_MASK        (RESET_BIT|FEED_HOLD_BIT|CYCLE_START_BIT|SAFETY_DOOR_BIT)
+#define CONTROL_MASK        (RESET_BIT|FEED_HOLD_BIT|CYCLE_START_BIT|SAFETY_DOOR_BIT|ESTOP_BIT)
 
-#define PROBE_PORT          0
+// Probe
+#define PROBE_PIN           0
+#define PROBE_CONNECTED_PIN 1
+
+#define PROBE_PORT          6
 #define PROBE_BIT           (1<<PROBE_PIN)
 #define PROBE_CONNECTED_BIT (1<<PROBE_CONNECTED_PIN)
 #define PROBE_MASK          (PROBE_BIT|PROBE_CONNECTED_BIT)

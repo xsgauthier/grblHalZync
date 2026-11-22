@@ -5,6 +5,7 @@ target_sources(zynq INTERFACE
  ${CMAKE_CURRENT_LIST_DIR}/mcu.c
  ${CMAKE_CURRENT_LIST_DIR}/grbl_interface.c
  ${CMAKE_CURRENT_LIST_DIR}/platform_linux.c
+ ${CMAKE_CURRENT_LIST_DIR}/axis_stepper.c
 )
 
 target_include_directories(zynq INTERFACE ${CMAKE_CURRENT_LIST_DIR})

@@ -42,7 +42,7 @@ static void printBlock(void);
 //True when the grbl thread has nothing left to do: no queued input, no planned
 //or executing motion, no running delay (G4 dwell) and no response bytes still
 //on their way out. The state check alone misses dwells, which run in STATE_IDLE.
-static bool grbl_is_idle (void)
+bool grbl_is_idle (void)
 {
     return state_get() < STATE_HOMING &&
             plan_get_current_block() == NULL &&

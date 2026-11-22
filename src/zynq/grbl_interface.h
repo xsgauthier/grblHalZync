@@ -25,3 +25,4 @@ void grbl_per_tick(void);           //call per tick to print steps
 void grbl_per_byte(void);           //call per incoming byte (simulator thread)
 void grbl_print_recent_block(void); //print newest planned block (grbl thread)
 void grbl_app_exit(void);           //call to shutdown cleanly
+extern bool grbl_is_idle (void);

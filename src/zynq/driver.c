@@ -121,7 +121,7 @@ inline static void set_step_outputs (axes_signals_t step_out)
 {
     step_out.bits = (step_out.bits) ^ settings.steppers.step_invert.bits;
 
-    mcu_gpio_set(&gpio[STEP_PORT0], step_out.bits, AXES_BITMASK);
+    mcu_gpio_set(&gpio[STEP_PORT], step_out.bits, AXES_BITMASK);
 }
 
 #endif
@@ -390,7 +390,7 @@ bool driver_setup (settings_t *settings)
     mcu_register_irq_handler(Stepper_IRQHandler, Timer0_IRQ);
 
     gpio[STEPPER_ENABLE_PORT].dir.mask = AXES_BITMASK;
-    gpio[STEP_PORT0].dir.mask = AXES_BITMASK;
+    gpio[STEP_PORT].dir.mask = AXES_BITMASK;
     gpio[DIR_PORT].dir.mask = AXES_BITMASK;
 
     gpio[COOLANT_PORT].dir.mask = COOLANT_MASK;

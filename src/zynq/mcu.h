@@ -28,7 +28,7 @@
 #include <stdbool.h>
 
 #define MCU_N_TIMERS 3
-#define MCU_N_GPIO 10
+#define MCU_N_GPIO 7
 
 // Upper bound for clock ticks skipped in one jump by the event-driven main loop.
 // Bounds how long a change made from the grbl thread (e.g. stepper wake-up) can go
@@ -48,9 +48,6 @@ typedef enum  {
     GPIO4_IRQ,
     GPIO5_IRQ,
     GPIO6_IRQ,
-    GPIO7_IRQ,
-    GPIO8_IRQ,
-    GPIO9_IRQ,
     IRQ_N_HANDLERS
 } irq_num_t;
 

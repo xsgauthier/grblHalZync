@@ -26,6 +26,8 @@
 #include "mcu.h"
 #include "simulator.h"
 #include "grbl/hal.h"
+#include "driver.h"
+#include "grbl_interface.h"
 
 static volatile bool irq_enable = false;
 static volatile bool booted = false;
@@ -50,11 +52,20 @@ mcu_uart_t uart;
 mcu_timer_t timer[MCU_N_TIMERS];
 mcu_timer_t systick_timer;
 gpio_port_t gpio[MCU_N_GPIO];
+static volatile struct step_delta_s {
+    uint64_t last_tick;
+    uint64_t this_tick;
+    bool has_direction;
+    bool has_step;
+    uint16_t direction;
+    uint16_t step;
+} step_delta;
 
 static void default_handler (void)
 {
     // NOOP - TODO: change to blocking loop?
 }
+
 
 void mcu_reset (void)
 {
@@ -69,7 +80,7 @@ void mcu_reset (void)
     memset(&timer, 0, sizeof(mcu_timer_t) * MCU_N_TIMERS);
     memset(&systick_timer, 0, sizeof(mcu_timer_t));
     memset(&gpio, 0, sizeof(gpio_port_t) * MCU_N_GPIO);
-
+    memset(&step_delta, 0, sizeof(struct step_delta_s));
     // all timers/gpio just zeroed - reset the fast-path caches to match
     timer_enabled_mask = 0;
     gpio_irq_pending = false;
@@ -113,6 +124,10 @@ void mcu_master_clock (void)
 
     if(!booted)
         return;
+
+    if (grbl_is_idle()) {
+        if (stepper_handle)stepper_handle->flush(stepper_handle);
+    }
 
     // Timer loop - skipped entirely when no timer[] timer is enabled. The inner
     // per-timer logic is unchanged; only the switch() dispatch is replaced with a
@@ -231,8 +246,35 @@ void mcu_skip_ticks (uint32_t ticks)
         systick_timer.value -= ticks;
 }
 
+#include "axis_stepper.h"
+static volatile p_axis_stepper_t stepper_handle = NULL;
+
 void mcu_gpio_set (gpio_port_t *port, uint16_t pins, uint16_t mask)
 {
+    uint64_t this_tick;
+    if (stepper_handle) {
+        this_tick = sim.masterclock;
+        if (port == &gpio[DIR_PORT]) {
+            step_delta.direction = (pins & mask);
+            step_delta.has_direction = 1;
+        } else if (port == &gpio[STEP_PORT]) {
+            step_delta.step = (pins & mask);
+            step_delta.has_step = 1;
+        }
+
+        if (step_delta.has_direction && step_delta.has_step
+             && step_delta.step) {
+            if (step_delta.last_tick == 0) {
+                step_delta.this_tick = step_delta.last_tick = this_tick;
+            } else {
+                step_delta.this_tick = this_tick;
+            }
+            if (stepper_handle) {
+                stepper_handle->write(stepper_handle, step_delta.step, step_delta.direction, this_tick - step_delta.last_tick);
+                step_delta.last_tick = step_delta.this_tick;
+            }
+        }
+    }
     port->state.value = (port->state.value & ~mask) | (pins & mask);
 }
 
@@ -308,7 +350,6 @@ static plat_thread_t *io_thread = NULL;
 static void *mcu_io_thread (void *arg)
 {
     while(!io_thread->exit) {
-        
         sim_yield();
     }
 
@@ -317,6 +358,7 @@ static void *mcu_io_thread (void *arg)
 
 void mcu_setup_io_thread(void)
 {
+    stepper_handle = axis_stepper_initialize();
     io_thread = platform_start_thread(mcu_io_thread);
 }
 
@@ -326,6 +368,8 @@ void mcu_terminate_io_thread(void)
         io_thread->exit = 1;
         platform_join_thread(io_thread);
         io_thread = NULL;
+        axis_stepper_close(stepper_handle);
+        stepper_handle = NULL;
     }
 }
 
