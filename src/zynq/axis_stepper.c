@@ -2,8 +2,6 @@
 
 #define AXIS_FIFO_DEV_PATH "/dev/axis_fifo0"
 
-#define MIN_DELAY_CYCLES 4200
-
 // Direction and enable fields are ordered Z/Y/X; this test drives X and Y.
 #define DELAY_BITS 26
 #define DELAY_MASK ((1U << DELAY_BITS) - 1U)
@@ -13,6 +11,9 @@
 
 #define ENABLE_POS DELAY_BITS
 #define DIRECTION_POS (ENABLE_POS+NUM_AXES)
+
+#define MIN_DELAY_CYCLES 4200
+#define MAX_DELAY_CYCLES ((1<<DELAY_BITS)-1)
 
 static volatile sig_atomic_t keep_running = 1;
 
@@ -64,9 +65,12 @@ static int queue_word(p_axis_stepper_t handle,
                       uint32_t dir_mask,
                       uint32_t delay_cycles)
 {
-    if (delay_cycles > DELAY_MASK) {
-        fprintf(stderr, "[-] Delay is outside the FIFO format.\n");
-        return -1;
+    if (delay_cycles > MAX_DELAY_CYCLES) {
+        fprintf(stderr, "[-] WARN: Delay is outside the FIFO format, clipping at %lu.\n", MIN_DELAY_CYCLES);
+        delay_cycles = MIN_DELAY_CYCLES;
+    }
+    if (delay_cycles < MIN_DELAY_CYCLES) {
+        delay_cycles = MIN_DELAY_CYCLES;
     }
 
     uint32_t word = (delay_cycles & DELAY_MASK) 
