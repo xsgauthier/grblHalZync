@@ -125,6 +125,11 @@ void platform_sleep(long  microsec)
 plat_thread_t* platform_start_thread(plat_threadfunc_t threadfunc)
 {
     plat_thread_t* th = malloc(sizeof(plat_thread_t));
+
+    if (!th)
+        return NULL;
+
+    th->exit = 0;
     if (pthread_create(&th->tid, NULL, threadfunc, &th->exit)){
         free(th);
         return NULL;
