@@ -63,11 +63,14 @@ static int flush_words(p_axis_stepper_t handle)
     return result;
 }
 
+#define DELAY_SCALING (50000000U/F_CPU)
+
 static int queue_word(p_axis_stepper_t handle,
                       uint32_t step_mask,
                       uint32_t dir_mask,
                       uint32_t delay_cycles)
 {
+    delay_cycles *= DELAY_SCALING;
     if (delay_cycles > MAX_DELAY_CYCLES) {
         logger_fprintf(stderr, "[-] WARN: Delay is outside the FIFO format, clipping at %u.\n", (unsigned)MAX_DELAY_CYCLES);
         delay_cycles = MAX_DELAY_CYCLES;
