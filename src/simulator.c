@@ -49,7 +49,7 @@ sim_vars_t sim = {
 // Setup 
 void init_simulator (void)
 {
-    sim.baud_ticks = F_CPU / 115200;
+    sim.baud_ticks = F_CPU / 1152000;
 
     sim.on_init();
 }

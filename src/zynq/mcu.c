@@ -335,7 +335,7 @@ void simulate_serial (void)
     // byte slot and try again at the next one, no input is lost.
     static uint32_t pulse_seen = 0;
 
-    if(sim.grbl_pulse != pulse_seen && uart.rx_irq_enable && !uart.rx_irq && hal.stream.get_rx_buffer_free() > 100) {
+    if(sim.grbl_pulse != pulse_seen && uart.rx_irq_enable && !uart.rx_irq && hal.stream.get_rx_buffer_free() > 1) {
         uint8_t char_in = sim.getchar();
         if (char_in) {
             pulse_seen = sim.grbl_pulse;
