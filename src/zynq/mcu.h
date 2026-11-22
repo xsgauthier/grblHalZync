@@ -20,9 +20,9 @@
 
 */
 
-#ifndef _MCU_H_
+#ifndef _ZYNQ_MCU_H_
 
-#define _MCU_H_
+#define _ZYNQ_MCU_H_
 
 #include <stdint.h>
 #include <stdbool.h>
