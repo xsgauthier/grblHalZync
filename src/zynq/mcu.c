@@ -22,12 +22,16 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sched.h>
 
 #include "mcu.h"
 #include "simulator.h"
 #include "grbl/hal.h"
 #include "driver.h"
 #include "grbl_interface.h"
+#include "axis_stepper.h"
+
+static volatile p_axis_stepper_t stepper_handle = NULL;
 
 static volatile bool irq_enable = false;
 static volatile bool booted = false;
@@ -246,9 +250,6 @@ void mcu_skip_ticks (uint32_t ticks)
         systick_timer.value -= ticks;
 }
 
-#include "axis_stepper.h"
-static volatile p_axis_stepper_t stepper_handle = NULL;
-
 void mcu_gpio_set (gpio_port_t *port, uint16_t pins, uint16_t mask)
 {
     uint64_t this_tick;
@@ -350,7 +351,7 @@ static plat_thread_t *io_thread = NULL;
 static void *mcu_io_thread (void *arg)
 {
     while(!io_thread->exit) {
-        sim_yield();
+        sched_yield();
     }
 
     return NULL;
@@ -365,8 +366,7 @@ void mcu_setup_io_thread(void)
 void mcu_terminate_io_thread(void)
 {
     if(io_thread) {
-        io_thread->exit = 1;
-        platform_join_thread(io_thread);
+        platform_stop_thread(io_thread);
         io_thread = NULL;
         axis_stepper_close(stepper_handle);
         stepper_handle = NULL;
