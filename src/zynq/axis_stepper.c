@@ -84,6 +84,11 @@ p_axis_stepper_t axis_stepper_initialize(void)
 {
     p_axis_stepper_t handle = calloc(1, sizeof(axis_stepper_t));
 
+    if (!handle) {
+        perror("[-] Failed to allocate axis FIFO state");
+        return NULL;
+    }
+
     printf("[+] Opening axis FIFO: %s...\n", AXIS_FIFO_DEV_PATH);
     handle->fd = open(AXIS_FIFO_DEV_PATH, O_WRONLY);
     if (handle->fd < 0) {
@@ -100,6 +105,9 @@ p_axis_stepper_t axis_stepper_initialize(void)
 
 void axis_stepper_close(p_axis_stepper_t handle)
 {
+    if (!handle)
+        return;
+
     close(handle->fd);
     free(handle);
 }

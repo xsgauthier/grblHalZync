@@ -350,7 +350,9 @@ static plat_thread_t *io_thread = NULL;
 
 static void *mcu_io_thread (void *arg)
 {
-    while(!io_thread->exit) {
+    volatile int *exit_requested = arg;
+
+    while(!*exit_requested) {
         sched_yield();
     }
 
@@ -360,7 +362,8 @@ static void *mcu_io_thread (void *arg)
 void mcu_setup_io_thread(void)
 {
     stepper_handle = axis_stepper_initialize();
-    io_thread = platform_start_thread(mcu_io_thread);
+    if(stepper_handle)
+        io_thread = platform_start_thread(mcu_io_thread);
 }
 
 void mcu_terminate_io_thread(void)
@@ -368,8 +371,9 @@ void mcu_terminate_io_thread(void)
     if(io_thread) {
         platform_stop_thread(io_thread);
         io_thread = NULL;
-        axis_stepper_close(stepper_handle);
-        stepper_handle = NULL;
     }
+
+    axis_stepper_close(stepper_handle);
+    stepper_handle = NULL;
 }
 
