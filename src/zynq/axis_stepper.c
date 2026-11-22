@@ -1,4 +1,7 @@
 #include "axis_stepper.h"
+#include "logger.h"
+
+#include <string.h>
 
 #define AXIS_FIFO_DEV_PATH "/dev/axis_fifo0"
 
@@ -56,7 +59,7 @@ static int flush_words(p_axis_stepper_t handle)
     if (result == 0)
         handle->count = 0;
     else if (result < 0)
-        perror("[-] Failed to write motor FIFO");
+        logger_fprintf(stderr, "[-] Failed to write motor FIFO: %s\n", strerror(errno));
     return result;
 }
 
@@ -66,8 +69,8 @@ static int queue_word(p_axis_stepper_t handle,
                       uint32_t delay_cycles)
 {
     if (delay_cycles > MAX_DELAY_CYCLES) {
-        fprintf(stderr, "[-] WARN: Delay is outside the FIFO format, clipping at %lu.\n", MIN_DELAY_CYCLES);
-        delay_cycles = MIN_DELAY_CYCLES;
+        logger_fprintf(stderr, "[-] WARN: Delay is outside the FIFO format, clipping at %u.\n", (unsigned)MAX_DELAY_CYCLES);
+        delay_cycles = MAX_DELAY_CYCLES;
     }
     if (delay_cycles < MIN_DELAY_CYCLES) {
         delay_cycles = MIN_DELAY_CYCLES;
@@ -89,14 +92,14 @@ p_axis_stepper_t axis_stepper_initialize(void)
     p_axis_stepper_t handle = calloc(1, sizeof(axis_stepper_t));
 
     if (!handle) {
-        perror("[-] Failed to allocate axis FIFO state");
+        logger_fprintf(stderr, "[-] Failed to allocate axis FIFO state\n");
         return NULL;
     }
 
-    printf("[+] Opening axis FIFO: %s...\n", AXIS_FIFO_DEV_PATH);
+    logger_fprintf(stdout, "[+] Opening axis FIFO: %s...\n", AXIS_FIFO_DEV_PATH);
     handle->fd = open(AXIS_FIFO_DEV_PATH, O_WRONLY);
     if (handle->fd < 0) {
-        perror("[-] Failed to open axis FIFO");
+        logger_fprintf(stderr, "[-] Failed to open axis FIFO: %s\n", strerror(errno));
         free(handle);
         return NULL;
     }
