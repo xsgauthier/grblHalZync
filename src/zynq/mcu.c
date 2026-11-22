@@ -21,8 +21,8 @@
 */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sched.h>
 
 #include "mcu.h"
 #include "simulator.h"
@@ -30,6 +30,7 @@
 #include "driver.h"
 #include "grbl_interface.h"
 #include "axis_stepper.h"
+#include "logger.h"
 
 static volatile p_axis_stepper_t stepper_handle = NULL;
 
@@ -130,7 +131,8 @@ void mcu_master_clock (void)
         return;
 
     if (grbl_is_idle()) {
-        if (stepper_handle)stepper_handle->flush(stepper_handle);
+        if (stepper_handle)
+            axis_stepper_flush(stepper_handle);
     }
 
     // Timer loop - skipped entirely when no timer[] timer is enabled. The inner
@@ -271,7 +273,7 @@ void mcu_gpio_set (gpio_port_t *port, uint16_t pins, uint16_t mask)
                 step_delta.this_tick = this_tick;
             }
             if (stepper_handle) {
-                stepper_handle->write(stepper_handle, step_delta.step, step_delta.direction, this_tick - step_delta.last_tick);
+                axis_stepper_enqueue(stepper_handle, step_delta.step, step_delta.direction, this_tick - step_delta.last_tick);
                 step_delta.last_tick = step_delta.this_tick;
             }
         }
@@ -350,24 +352,27 @@ static plat_thread_t *io_thread = NULL;
 
 static void *mcu_io_thread (void *arg)
 {
-    volatile int *exit_requested = arg;
-
-    while(!*exit_requested) {
-        sched_yield();
-    }
-
-    return NULL;
+    (void)arg;
+    return axis_stepper_writer_thread(stepper_handle);
 }
 
 void mcu_setup_io_thread(void)
 {
     stepper_handle = axis_stepper_initialize();
-    if(stepper_handle)
+    if(stepper_handle) {
         io_thread = platform_start_thread(mcu_io_thread);
+        if (!io_thread) {
+            logger_fprintf(stderr, "[-] Failed to start axis FIFO writer thread\n");
+            axis_stepper_close(stepper_handle);
+            stepper_handle = NULL;
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
 void mcu_terminate_io_thread(void)
 {
+    axis_stepper_stop(stepper_handle);
     if(io_thread) {
         platform_stop_thread(io_thread);
         io_thread = NULL;
