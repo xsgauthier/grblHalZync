@@ -143,71 +143,102 @@ uint8_t sim_socket_in()
 
 #else
 
+#include <time.h>
+
+#define SOCKET_INPUT_BUFFER_SIZE 1024
+#define SOCKET_INPUT_REFILL_LEVEL (SOCKET_INPUT_BUFFER_SIZE / 2)
+#define SOCKET_INPUT_POLL_INTERVAL_NS 1000000ULL
+
+static uint8_t socket_input_buffer[SOCKET_INPUT_BUFFER_SIZE];
+static size_t socket_input_offset;
+static size_t socket_input_count;
+static uint64_t socket_next_poll_ns;
+
+static uint64_t monotonic_time_ns(void)
+{
+    struct timespec now;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return socket_next_poll_ns;
+
+    return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+}
+
 //return char if one available.
 uint8_t sim_socket_in()
 {
     char c = 0;
-    int retval;
+    uint64_t now = monotonic_time_ns();
+    size_t available = SOCKET_INPUT_BUFFER_SIZE - socket_input_count;
 
-    struct timeval tv = {
-        .tv_sec = 0,
-        .tv_usec = 0
-    };
+    // Refill when half the buffer is free; while idle, poll at most once per ms.
+    if (available >= SOCKET_INPUT_REFILL_LEVEL && now >= socket_next_poll_ns) {
+        fd_set readable;
+        struct timeval timeout = { .tv_sec = 0, .tv_usec = 0 };
+        int max_fd = -1;
+        int accepted = 0;
+        int retval;
 
-    // Use select() ONLY to detect a new incoming connection on the listening
-    // socket. Data on the accepted connection is read with a single
-    // non-blocking read() below (the accepted socket is put in O_NONBLOCK once
-    // right after accept), instead of select()ing on it every poll.
-    fd_set cfds;
-    FD_ZERO(&cfds);
-    FD_SET(socket_fd, &cfds);
+        socket_next_poll_ns = now + SOCKET_INPUT_POLL_INTERVAL_NS;
+        FD_ZERO(&readable);
 
-    int accepted = 0;
-
-    if((retval = select(socket_fd + 1, &cfds, NULL, NULL, &tv)) > 0 && FD_ISSET(socket_fd, &cfds)) {
-
-        socklen_t addrlen = sizeof(struct sockaddr_in);
-        struct sockaddr_in client_addr;
-
-        sim.socket_fd = accept(socket_fd, (struct sockaddr *) &client_addr, &addrlen);
-        if (sim.socket_fd < 0) {
-            printf("Fatal: Error on socket accept.\n");
-            exit(-5);
+        if (socket_fd > 0 && sim.socket_fd <= 0) {
+            FD_SET(socket_fd, &readable);
+            max_fd = socket_fd;
+        }
+        if (sim.socket_fd > 0) {
+            FD_SET(sim.socket_fd, &readable);
+            if (sim.socket_fd > max_fd)
+                max_fd = sim.socket_fd;
         }
 
-        FD_SET(sim.socket_fd, &rfds);
+        retval = max_fd >= 0 ? select(max_fd + 1, &readable, NULL, NULL, &timeout) : 0;
 
-        // Put the accepted socket into non-blocking mode once so subsequent
-        // reads return immediately when there is no data.
-        int flags = fcntl(sim.socket_fd, F_GETFL, 0);
-        if (flags != -1)
-            fcntl(sim.socket_fd, F_SETFL, flags | O_NONBLOCK);
+        if (retval > 0 && socket_fd > 0 && sim.socket_fd <= 0 && FD_ISSET(socket_fd, &readable)) {
+            socklen_t addrlen = sizeof(struct sockaddr_in);
+            struct sockaddr_in client_addr;
 
-        // Disable Nagle: status polls and responses are tiny; Nagle + delayed
-        // ACK can hold the tail of a response line back by up to ~200 ms.
-        int nodelay = 1;
-        setsockopt(sim.socket_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+            sim.socket_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &addrlen);
+            if (sim.socket_fd < 0) {
+                printf("Fatal: Error on socket accept.\n");
+                exit(-5);
+            }
 
-        accepted = 1;
+            FD_SET(sim.socket_fd, &rfds);
+
+            int flags = fcntl(sim.socket_fd, F_GETFL, 0);
+            if (flags != -1)
+                fcntl(sim.socket_fd, F_SETFL, flags | O_NONBLOCK);
+
+            int nodelay = 1;
+            setsockopt(sim.socket_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+            accepted = 1;
+        }
+
+        if (!accepted && retval > 0 && sim.socket_fd > 0 && FD_ISSET(sim.socket_fd, &readable)) {
+            if (socket_input_offset) {
+                memmove(socket_input_buffer, socket_input_buffer + socket_input_offset, socket_input_count);
+                socket_input_offset = 0;
+            }
+
+            available = SOCKET_INPUT_BUFFER_SIZE - socket_input_offset - socket_input_count;
+            retval = (int)read(sim.socket_fd, socket_input_buffer + socket_input_offset + socket_input_count, available);
+
+            if (retval > 0) {
+                socket_input_count += (size_t)retval;
+            } else if (retval == 0) {
+                close(sim.socket_fd);
+                FD_CLR(sim.socket_fd, &rfds);
+                sim.socket_fd = 0;
+            }
+        }
     }
 
-    // Read incoming data from the accepted connection. Skip on the poll where
-    // we just accepted (a brand-new connection has no data yet), matching the
-    // old select()-gated behavior.
-    if(!accepted && sim.socket_fd > 0) {
-
-        retval = read(sim.socket_fd, &c, 1);
-
-        if(retval == 0) {
-            close(sim.socket_fd);
-            FD_CLR(sim.socket_fd, &rfds);
-            sim.socket_fd = 0;
-            c = 0;
-        } else if(retval < 0) {
-            c = 0;   // EAGAIN/EWOULDBLOCK: no data available
-        }
-//            if(c && c != '?' && c >= ' ')
-//                sim_serial_out(c == '\r' ? '\n' : c);
+    if (socket_input_count) {
+        c = (char)socket_input_buffer[socket_input_offset++];
+        socket_input_count--;
+        if (socket_input_count == 0)
+            socket_input_offset = 0;
     }
 
     return c;

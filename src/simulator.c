@@ -207,22 +207,24 @@ void sim_loop (void)
     }
 }
 
+#define SOCKET_BUFFER_LEN (2^11)
+
 // Print serial output to args.serial_out_file
 void sim_serial_out (uint8_t data)
 {
-    static uint8_t buf[128] = {0};
+    static uint8_t buf[SOCKET_BUFFER_LEN] = {0};
     static uint8_t len = 0;
     static bool continuation = 0;
 
     buf[len++] = data;
     // print when we get to newline or run out of buffer
-    if(data == '\n' || data == '\r' || len >= 127) {
+    if(data == '\n' || data == '\r' || len >= (SOCKET_BUFFER_LEN-1)) {
         if (args.comment_char && !continuation)
             fprintf(args.serial_out_file, "%c ", args.comment_char);
         buf[len] = '\0';
         fprintf(args.serial_out_file, "%s", buf);
         // don't print comment on next line if we are just printing to avoid buffer overflow
-        continuation = (len >= 128); 
+        continuation = (len >= SOCKET_BUFFER_LEN); 
         len = 0;
     }
 }
@@ -230,7 +232,7 @@ void sim_serial_out (uint8_t data)
 // Print serial output to sim.socket_fd stream
 void sim_socket_out (uint8_t data)
 {
-    static uint8_t buf[128] = {0};
+    static uint8_t buf[SOCKET_BUFFER_LEN] = {0};
     static uint8_t len = 0;
     static bool continuation = 0;
 
@@ -240,7 +242,7 @@ void sim_socket_out (uint8_t data)
     // split every line into body+"\r" and a lone "\n" segment; with Nagle the
     // trailing byte could stall behind the peer's delayed ACK (~200 ms on
     // Windows), making senders' status updates lag by a poll period.
-    if(data == '\n' || len >= 127) {
+    if(data == '\n' || len >= (SOCKET_BUFFER_LEN-1)) {
 //        if (args.comment_char && !continuation)
 //            fprintf(args.serial_out_file, "%c ", args.comment_char);
 #ifdef WIN32
@@ -255,7 +257,7 @@ void sim_socket_out (uint8_t data)
         }
 #endif
         // don't print comment on next line if we are just printing to avoid buffer overflow
-        continuation = (len >= 128); 
+        continuation = (len >= SOCKET_BUFFER_LEN); 
         len = 0;
     }
 }
