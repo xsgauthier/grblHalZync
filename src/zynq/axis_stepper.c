@@ -45,6 +45,7 @@ struct axis_stepper_s {
     int stopping;
     int output_started;
     int feed_hold;
+    int refill_after_hold;
     pthread_mutex_t startup_mutex;
     pthread_cond_t startup_ready;
     int last_error;
@@ -72,7 +73,7 @@ static void report_diagnostics(p_axis_stepper_t handle)
 static void start_output(p_axis_stepper_t handle)
 {
     pthread_mutex_lock(&handle->startup_mutex);
-    if (!handle->output_started) {
+    if (!handle->stopping && !handle->feed_hold && !handle->refill_after_hold && !handle->output_started) {
         handle->output_started = 1;
         pthread_cond_broadcast(&handle->startup_ready);
     }
@@ -93,8 +94,17 @@ static void start_output_if_pool_half_full(p_axis_stepper_t handle)
     size_t pool_used, pool_capacity;
 
     object_pool_get_stats(handle->pool, &pool_used, NULL, &pool_capacity);
-    if (pool_used >= pool_capacity / 2 + pool_capacity % 2)
-        start_output(handle);
+    if (pool_used >= pool_capacity / 2 + pool_capacity % 2) {
+        pthread_mutex_lock(&handle->startup_mutex);
+        if (!handle->stopping && !handle->feed_hold) {
+            handle->refill_after_hold = 0;
+            if (!handle->output_started) {
+                handle->output_started = 1;
+                pthread_cond_broadcast(&handle->startup_ready);
+            }
+        }
+        pthread_mutex_unlock(&handle->startup_mutex);
+    }
 }
 
 static int wait_for_free_batch(p_axis_stepper_t handle)
@@ -267,10 +277,15 @@ void axis_stepper_set_feed_hold(p_axis_stepper_t handle, int active)
     pthread_mutex_lock(&handle->startup_mutex);
     if (handle->feed_hold != (active != 0)) {
         handle->feed_hold = active != 0;
-        if (!handle->feed_hold)
-            pthread_cond_broadcast(&handle->startup_ready);
+        if (handle->feed_hold) {
+            handle->output_started = 0;
+            handle->refill_after_hold = 1;
+        }
     }
     pthread_mutex_unlock(&handle->startup_mutex);
+
+    if (!active)
+        start_output_if_pool_half_full(handle);
 }
 
 void *axis_stepper_writer_thread(void *arg)
@@ -282,17 +297,9 @@ void *axis_stepper_writer_thread(void *arg)
     sigaddset(&blocked_signals, SIGPIPE);
     pthread_sigmask(SIG_BLOCK, &blocked_signals, NULL);
 
-    pthread_mutex_lock(&handle->startup_mutex);
-    while (!handle->output_started)
-        pthread_cond_wait(&handle->startup_ready, &handle->startup_mutex);
-    pthread_mutex_unlock(&handle->startup_mutex);
-
     for (;;) {
-        if (handle->feed_hold)
-        {
-            sim_yield();
-            continue;
-        }
+        wait_for_writer(handle);
+
         axis_step_batch_t *batch = NULL;
         int result = object_pool_take(handle->pool, (void **)&batch);
 
