@@ -434,7 +434,7 @@ bool driver_setup (settings_t *settings)
 // ensures hardware simulator gets some cycles in "parallel"
 void sim_process_realtime (uint_fast16_t state)
 {
-    if(grbl_is_idle())
+    if(gc_state.modal.program_flow != ProgramFlow_Running)
         mcu_stepper_start_output();
 
     // heartbeat for the simulator thread: the boot sequence (which flushes the
