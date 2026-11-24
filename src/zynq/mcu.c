@@ -32,6 +32,8 @@
 #include "axis_stepper.h"
 #include "logger.h"
 
+#define STEPPER_STARTUP_INPUT_IDLE_NS 1000000000U
+
 static volatile p_axis_stepper_t stepper_handle = NULL;
 
 static volatile bool irq_enable = false;
@@ -129,6 +131,12 @@ void mcu_master_clock (void)
 
     if(!booted)
         return;
+
+    if(stepper_handle && hal.stream.get_rx_buffer_count &&
+       hal.stream.get_rx_buffer_count() == 0 &&
+       (sim.input_closed || (sim.input_received &&
+        (uint32_t)(platform_ns() - sim.last_input_ns) >= STEPPER_STARTUP_INPUT_IDLE_NS)))
+        axis_stepper_input_complete(stepper_handle);
 
     if (grbl_is_idle()) {
         if (stepper_handle)
@@ -339,7 +347,11 @@ void simulate_serial (void)
 
     if(sim.grbl_pulse != pulse_seen && uart.rx_irq_enable && !uart.rx_irq && hal.stream.get_rx_buffer_free() > 1) {
         uint8_t char_in = sim.getchar();
-        if (char_in) {
+        if (char_in == 0xFF) {
+            sim.input_closed = 1;
+        } else if (char_in) {
+            sim.input_received = 1;
+            sim.last_input_ns = platform_ns();
             pulse_seen = sim.grbl_pulse;
             uart.rx_data = char_in;
             uart.rx_irq = 1;

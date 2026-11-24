@@ -6,6 +6,8 @@ target_sources(zynq INTERFACE
  ${CMAKE_CURRENT_LIST_DIR}/grbl_interface.c
  ${CMAKE_CURRENT_LIST_DIR}/platform_linux.c
  ${CMAKE_CURRENT_LIST_DIR}/axis_stepper.c
+ ${CMAKE_CURRENT_LIST_DIR}/axis_stepper_diagnostics.c
+ ${CMAKE_CURRENT_LIST_DIR}/object_pool.c
  ${CMAKE_CURRENT_LIST_DIR}/logger.c
 )
 

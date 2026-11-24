@@ -1,5 +1,7 @@
 #include "axis_stepper.h"
+#include "axis_stepper_diagnostics.h"
 #include "logger.h"
+#include "object_pool.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,10 +15,10 @@
 #include <unistd.h>
 
 #define AXIS_FIFO_DEV_PATH "/dev/axis_fifo0"
-#define AXIS_STEP_QUEUE_CAPACITY 4096
 #define AXIS_FIFO_WRITE_BATCH 64
+#define AXIS_STEP_CACHE_BYTES ((size_t)25 * 1024U * 1024U)
+#define AXIS_STEP_POOL_CHUNK_BYTES ((size_t)1024U * 1024U)
 #define AXIS_FIFO_RETRY_DELAY_NS 10000000L
-#define AXIS_DIAGNOSTIC_INTERVAL_NS 1000000000ULL
 #define AXIS_DIAGNOSTIC_WAIT_NS 100000000L
 
 #define DELAY_BITS 26
@@ -30,114 +32,98 @@
 
 #define DELAY_SCALING (50000000U / F_CPU)
 
-struct axis_stepper_s {
-    uint32_t words[AXIS_STEP_QUEUE_CAPACITY];
-    size_t head;
-    size_t tail;
+typedef struct {
+    uint32_t words[AXIS_FIFO_WRITE_BATCH];
     size_t count;
-    pthread_mutex_t mutex;
-    pthread_cond_t data_ready;
-    pthread_cond_t space_ready;
+} axis_step_batch_t;
+
+struct axis_stepper_s {
+    object_pool_t pool;
+    axis_step_batch_t *producer_batch;
+    size_t producer_count;
     int stopping;
+    int output_started;
+    pthread_mutex_t startup_mutex;
+    pthread_cond_t startup_ready;
     int last_error;
     int fd;
-    uint64_t diagnostic_timestamp_ns;
-    uint64_t diagnostic_words_written;
-    uint64_t diagnostic_producer_waits;
-    uint64_t diagnostic_producer_wait_ns;
-    uint64_t diagnostic_producer_wait_max_ns;
-    uint64_t diagnostic_fifo_eagain;
-    uint64_t diagnostic_fifo_wait_ns;
-    uint64_t diagnostic_fifo_wait_max_ns;
-    uint64_t diagnostic_fifo_write_calls;
-    uint64_t diagnostic_fifo_write_ns;
-    uint64_t diagnostic_fifo_write_max_ns;
-    uint64_t diagnostic_fifo_slow_writes;
-    uint64_t diagnostic_write_errors;
-    size_t diagnostic_queue_high_water;
-    uint64_t writer_syscall_started_ns;
-    int writer_syscall_active;
+    const axis_stepper_diagnostics_api_t *diagnostics_api;
+    axis_stepper_diagnostics_t diagnostics;
 };
-
-static uint64_t monotonic_time_ns(void)
-{
-    struct timespec now;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-        return 0;
-
-    return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
-}
 
 static void report_diagnostics(p_axis_stepper_t handle)
 {
-    uint64_t now = monotonic_time_ns();
-    uint64_t elapsed_ns, words_written, producer_waits, producer_wait_ns;
-    uint64_t producer_wait_max_ns, fifo_eagain, fifo_wait_ns, fifo_wait_max_ns;
-    uint64_t fifo_write_calls, fifo_write_ns, fifo_write_max_ns, fifo_slow_writes;
-    uint64_t write_errors;
-    uint64_t writer_active_ns;
-    int writer_active;
-    size_t queue_count, queue_high_water;
-
-    pthread_mutex_lock(&handle->mutex);
-    elapsed_ns = now - handle->diagnostic_timestamp_ns;
-    if (elapsed_ns < AXIS_DIAGNOSTIC_INTERVAL_NS) {
-        pthread_mutex_unlock(&handle->mutex);
+    if (!handle->diagnostics_api->enabled)
         return;
+
+    size_t pool_used, pool_capacity;
+
+    object_pool_get_stats(handle->pool, &pool_used, NULL, &pool_capacity);
+
+    handle->diagnostics_api->report(handle->diagnostics, pool_used, pool_capacity);
+}
+
+static void start_output(p_axis_stepper_t handle)
+{
+    pthread_mutex_lock(&handle->startup_mutex);
+    if (!handle->output_started) {
+        handle->output_started = 1;
+        pthread_cond_broadcast(&handle->startup_ready);
+    }
+    pthread_mutex_unlock(&handle->startup_mutex);
+}
+
+static void start_output_if_pool_half_full(p_axis_stepper_t handle)
+{
+    size_t pool_used, pool_capacity;
+
+    object_pool_get_stats(handle->pool, &pool_used, NULL, &pool_capacity);
+    if (pool_used >= pool_capacity / 2 + pool_capacity % 2)
+        start_output(handle);
+}
+
+static int wait_for_free_batch(p_axis_stepper_t handle)
+{
+    uint64_t wait_started_ns = handle->diagnostics_api->now_ns();
+    int waited = 0;
+    void *object = NULL;
+    int result;
+
+    while ((result = object_pool_acquire(handle->pool, &object, AXIS_DIAGNOSTIC_WAIT_NS / 1000000U)) == 0) {
+        if (!waited) {
+            handle->diagnostics_api->producer_wait_begin(handle->diagnostics);
+            waited = 1;
+        }
+        report_diagnostics(handle);
     }
 
-    handle->diagnostic_timestamp_ns = now;
-    words_written = handle->diagnostic_words_written;
-    producer_waits = handle->diagnostic_producer_waits;
-    producer_wait_ns = handle->diagnostic_producer_wait_ns;
-    producer_wait_max_ns = handle->diagnostic_producer_wait_max_ns;
-    fifo_eagain = handle->diagnostic_fifo_eagain;
-    fifo_wait_ns = handle->diagnostic_fifo_wait_ns;
-    fifo_wait_max_ns = handle->diagnostic_fifo_wait_max_ns;
-    fifo_write_calls = handle->diagnostic_fifo_write_calls;
-    fifo_write_ns = handle->diagnostic_fifo_write_ns;
-    fifo_write_max_ns = handle->diagnostic_fifo_write_max_ns;
-    fifo_slow_writes = handle->diagnostic_fifo_slow_writes;
-    write_errors = handle->diagnostic_write_errors;
-    queue_count = handle->count;
-    queue_high_water = handle->diagnostic_queue_high_water;
-    writer_active = handle->writer_syscall_active;
-    writer_active_ns = writer_active ? now - handle->writer_syscall_started_ns : 0;
+    if (waited)
+        handle->diagnostics_api->producer_wait_end(handle->diagnostics,
+                               handle->diagnostics_api->now_ns() - wait_started_ns);
 
-    handle->diagnostic_words_written = 0;
-    handle->diagnostic_producer_waits = 0;
-    handle->diagnostic_producer_wait_ns = 0;
-    handle->diagnostic_producer_wait_max_ns = 0;
-    handle->diagnostic_fifo_eagain = 0;
-    handle->diagnostic_fifo_wait_ns = 0;
-    handle->diagnostic_fifo_wait_max_ns = 0;
-    handle->diagnostic_fifo_write_calls = 0;
-    handle->diagnostic_fifo_write_ns = 0;
-    handle->diagnostic_fifo_write_max_ns = 0;
-    handle->diagnostic_fifo_slow_writes = 0;
-    handle->diagnostic_write_errors = 0;
-    handle->diagnostic_queue_high_water = handle->count;
-    pthread_mutex_unlock(&handle->mutex);
+    if (result != 1)
+        return -1;
 
-    if (words_written || producer_waits || fifo_eagain || fifo_write_calls || write_errors) {
-        logger_fprintf(stderr,
-                       "[stepper] q=%zu/%u high=%zu words=%llu producer_waits=%llu producer_wait_ms=%llu producer_wait_max_ms=%llu fifo_eagain=%llu fifo_wait_ms=%llu fifo_wait_max_ms=%llu write_calls=%llu write_ms=%llu write_max_ms=%llu write_slow=%llu writer_active_ms=%llu errors=%llu\n",
-                       queue_count, AXIS_STEP_QUEUE_CAPACITY, queue_high_water,
-                       (unsigned long long)words_written,
-                       (unsigned long long)producer_waits,
-                       (unsigned long long)(producer_wait_ns / 1000000ULL),
-                       (unsigned long long)(producer_wait_max_ns / 1000000ULL),
-                       (unsigned long long)fifo_eagain,
-                       (unsigned long long)(fifo_wait_ns / 1000000ULL),
-                       (unsigned long long)(fifo_wait_max_ns / 1000000ULL),
-                       (unsigned long long)fifo_write_calls,
-                       (unsigned long long)(fifo_write_ns / 1000000ULL),
-                       (unsigned long long)(fifo_write_max_ns / 1000000ULL),
-                       (unsigned long long)fifo_slow_writes,
-                       (unsigned long long)(writer_active_ns / 1000000ULL),
-                       (unsigned long long)write_errors);
-    }
+    handle->producer_batch = object;
+    handle->producer_count = 0;
+    handle->producer_batch->count = 0;
+    start_output_if_pool_half_full(handle);
+    report_diagnostics(handle);
+    return 0;
+}
+
+static int publish_producer_batch(p_axis_stepper_t handle)
+{
+    if (!handle->producer_batch || handle->producer_count == 0)
+        return 0;
+
+    handle->producer_batch->count = handle->producer_count;
+    if (object_pool_publish(handle->pool, handle->producer_batch) < 0)
+        return -1;
+
+    handle->producer_batch = NULL;
+    handle->producer_count = 0;
+    return 0;
 }
 
 static void retry_pause(void)
@@ -154,24 +140,9 @@ static void write_all(p_axis_stepper_t handle, const uint32_t *words, size_t cou
     size_t bytes_remaining = count * sizeof(*words);
 
     while (bytes_remaining > 0) {
-        uint64_t write_started_ns = monotonic_time_ns();
-        pthread_mutex_lock(&handle->mutex);
-        handle->writer_syscall_started_ns = write_started_ns;
-        handle->writer_syscall_active = 1;
-        pthread_mutex_unlock(&handle->mutex);
-
+        handle->diagnostics_api->write_begin(handle->diagnostics);
         ssize_t bytes_written = write(handle->fd, data, bytes_remaining);
-        uint64_t write_ns = monotonic_time_ns() - write_started_ns;
-
-        pthread_mutex_lock(&handle->mutex);
-        handle->writer_syscall_active = 0;
-        handle->diagnostic_fifo_write_calls++;
-        handle->diagnostic_fifo_write_ns += write_ns;
-        if (write_ns > handle->diagnostic_fifo_write_max_ns)
-            handle->diagnostic_fifo_write_max_ns = write_ns;
-        if (write_ns >= 1000000ULL)
-            handle->diagnostic_fifo_slow_writes++;
-        pthread_mutex_unlock(&handle->mutex);
+        handle->diagnostics_api->write_end(handle->diagnostics);
 
         if (bytes_written > 0) {
             data += bytes_written;
@@ -186,7 +157,7 @@ static void write_all(p_axis_stepper_t handle, const uint32_t *words, size_t cou
 
         if (error == EAGAIN || error == EWOULDBLOCK) {
             struct pollfd writable = { .fd = handle->fd, .events = POLLOUT };
-            uint64_t wait_started_ns = monotonic_time_ns();
+            uint64_t wait_started_ns = handle->diagnostics_api->now_ns();
             int result = poll(&writable, 1, 100);
 
             if (result > 0 && (writable.revents & (POLLERR | POLLHUP | POLLNVAL)))
@@ -194,13 +165,8 @@ static void write_all(p_axis_stepper_t handle, const uint32_t *words, size_t cou
             else if (result < 0 && errno != EINTR)
                 retry_pause();
 
-            uint64_t wait_ns = monotonic_time_ns() - wait_started_ns;
-            pthread_mutex_lock(&handle->mutex);
-            handle->diagnostic_fifo_eagain++;
-            handle->diagnostic_fifo_wait_ns += wait_ns;
-            if (wait_ns > handle->diagnostic_fifo_wait_max_ns)
-                handle->diagnostic_fifo_wait_max_ns = wait_ns;
-            pthread_mutex_unlock(&handle->mutex);
+            uint64_t wait_ns = handle->diagnostics_api->now_ns() - wait_started_ns;
+            handle->diagnostics_api->fifo_wait(handle->diagnostics, wait_ns);
             report_diagnostics(handle);
             continue;
         }
@@ -208,9 +174,7 @@ static void write_all(p_axis_stepper_t handle, const uint32_t *words, size_t cou
         if (handle->last_error != error) {
             logger_fprintf(stderr, "[-] Axis FIFO write failed: %s; retaining queued steps\n", strerror(error));
             handle->last_error = error;
-            pthread_mutex_lock(&handle->mutex);
-            handle->diagnostic_write_errors++;
-            pthread_mutex_unlock(&handle->mutex);
+            handle->diagnostics_api->write_error(handle->diagnostics);
         }
         retry_pause();
         report_diagnostics(handle);
@@ -237,56 +201,44 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
         | ((step_mask & NUM_AXES_MASK) << ENABLE_POS)
         | ((dir_mask & NUM_AXES_MASK) << DIRECTION_POS);
 
-    pthread_mutex_lock(&handle->mutex);
-    if (handle->count == AXIS_STEP_QUEUE_CAPACITY)
-        handle->diagnostic_producer_waits++;
-    uint64_t wait_started_ns = handle->count == AXIS_STEP_QUEUE_CAPACITY ? monotonic_time_ns() : 0;
-    while (handle->count == AXIS_STEP_QUEUE_CAPACITY && !handle->stopping) {
-        struct timespec deadline;
-
-        if (clock_gettime(CLOCK_REALTIME, &deadline) == 0) {
-            deadline.tv_nsec += AXIS_DIAGNOSTIC_WAIT_NS;
-            if (deadline.tv_nsec >= 1000000000L) {
-                deadline.tv_sec++;
-                deadline.tv_nsec -= 1000000000L;
-            }
-            if (pthread_cond_timedwait(&handle->space_ready, &handle->mutex, &deadline) == ETIMEDOUT) {
-                pthread_mutex_unlock(&handle->mutex);
-                report_diagnostics(handle);
-                pthread_mutex_lock(&handle->mutex);
-            }
-        } else {
-            pthread_cond_wait(&handle->space_ready, &handle->mutex);
-        }
-    }
-
-    if (wait_started_ns) {
-        uint64_t wait_ns = monotonic_time_ns() - wait_started_ns;
-        handle->diagnostic_producer_wait_ns += wait_ns;
-        if (wait_ns > handle->diagnostic_producer_wait_max_ns)
-            handle->diagnostic_producer_wait_max_ns = wait_ns;
-    }
-
     if (handle->stopping) {
-        pthread_mutex_unlock(&handle->mutex);
         errno = ECANCELED;
         return -1;
     }
 
-    handle->words[handle->tail] = word;
-    handle->tail = (handle->tail + 1) % AXIS_STEP_QUEUE_CAPACITY;
-    handle->count++;
-    if (handle->count > handle->diagnostic_queue_high_water)
-        handle->diagnostic_queue_high_water = handle->count;
-    pthread_cond_signal(&handle->data_ready);
-    pthread_mutex_unlock(&handle->mutex);
+    handle->producer_batch->words[handle->producer_count++] = word;
+    if (handle->producer_count == AXIS_FIFO_WRITE_BATCH) {
+        if (publish_producer_batch(handle) < 0) {
+            errno = ECANCELED;
+            return -1;
+        }
+        if (wait_for_free_batch(handle) < 0) {
+            errno = ECANCELED;
+            return -1;
+        }
+    }
 
     return 0;
 }
 
 int axis_stepper_flush(p_axis_stepper_t handle)
 {
-    return handle ? 0 : -1;
+    if (!handle)
+        return -1;
+
+    if (!handle->stopping && handle->producer_count) {
+        if (publish_producer_batch(handle) < 0)
+            return -1;
+        int result = wait_for_free_batch(handle);
+        return result;
+    }
+    return 0;
+}
+
+void axis_stepper_input_complete(p_axis_stepper_t handle)
+{
+    if (handle)
+        start_output(handle);
 }
 
 void *axis_stepper_writer_thread(void *arg)
@@ -298,35 +250,22 @@ void *axis_stepper_writer_thread(void *arg)
     sigaddset(&blocked_signals, SIGPIPE);
     pthread_sigmask(SIG_BLOCK, &blocked_signals, NULL);
 
+    pthread_mutex_lock(&handle->startup_mutex);
+    while (!handle->output_started)
+        pthread_cond_wait(&handle->startup_ready, &handle->startup_mutex);
+    pthread_mutex_unlock(&handle->startup_mutex);
+
     for (;;) {
-        uint32_t batch[AXIS_FIFO_WRITE_BATCH];
-        size_t batch_count;
+        axis_step_batch_t *batch = NULL;
+        int result = object_pool_take(handle->pool, (void **)&batch);
 
-        pthread_mutex_lock(&handle->mutex);
-        while (handle->count == 0 && !handle->stopping)
-            pthread_cond_wait(&handle->data_ready, &handle->mutex);
-
-        if (handle->count == 0 && handle->stopping) {
-            pthread_mutex_unlock(&handle->mutex);
+        if (result <= 0)
             break;
-        }
 
-        batch_count = handle->count;
-        if (batch_count > AXIS_FIFO_WRITE_BATCH)
-            batch_count = AXIS_FIFO_WRITE_BATCH;
-        if (batch_count > AXIS_STEP_QUEUE_CAPACITY - handle->head)
-            batch_count = AXIS_STEP_QUEUE_CAPACITY - handle->head;
-        memcpy(batch, handle->words + handle->head, batch_count * sizeof(*batch));
-        pthread_mutex_unlock(&handle->mutex);
+        write_all(handle, batch->words, batch->count);
 
-        write_all(handle, batch, batch_count);
-
-        pthread_mutex_lock(&handle->mutex);
-        handle->head = (handle->head + batch_count) % AXIS_STEP_QUEUE_CAPACITY;
-        handle->count -= batch_count;
-        handle->diagnostic_words_written += batch_count;
-        pthread_cond_broadcast(&handle->space_ready);
-        pthread_mutex_unlock(&handle->mutex);
+        object_pool_release(handle->pool, batch);
+        handle->diagnostics_api->words_written(handle->diagnostics, batch->count);
         report_diagnostics(handle);
     }
 
@@ -338,17 +277,16 @@ void axis_stepper_stop(p_axis_stepper_t handle)
     if (!handle)
         return;
 
-    pthread_mutex_lock(&handle->mutex);
     handle->stopping = 1;
-    pthread_cond_broadcast(&handle->data_ready);
-    pthread_cond_broadcast(&handle->space_ready);
-    pthread_mutex_unlock(&handle->mutex);
+    publish_producer_batch(handle);
+    start_output(handle);
+    object_pool_stop(handle->pool);
 }
 
 p_axis_stepper_t axis_stepper_initialize(void)
 {
     p_axis_stepper_t handle = calloc(1, sizeof(*handle));
-    int error;
+    void *producer_batch = NULL;
 
     if (!handle) {
         logger_fprintf(stderr, "[-] Failed to allocate axis FIFO state\n");
@@ -371,34 +309,63 @@ p_axis_stepper_t axis_stepper_initialize(void)
         return NULL;
     }
 
-    error = pthread_mutex_init(&handle->mutex, NULL);
-    if (error) {
-        logger_fprintf(stderr, "[-] Failed to initialize axis FIFO queue mutex: %s\n", strerror(error));
+    handle->diagnostics_api = axis_stepper_diagnostics_get_api();
+    handle->diagnostics = handle->diagnostics_api->create();
+    if (!handle->diagnostics) {
+        logger_fprintf(stderr, "[-] Failed to initialize axis FIFO diagnostics\n");
         close(handle->fd);
         free(handle);
         return NULL;
     }
 
-    error = pthread_cond_init(&handle->data_ready, NULL);
-    if (error) {
-        logger_fprintf(stderr, "[-] Failed to initialize axis FIFO queue condition: %s\n", strerror(error));
-        pthread_mutex_destroy(&handle->mutex);
+    handle->pool = object_pool_create(sizeof(axis_step_batch_t), AXIS_STEP_CACHE_BYTES,
+                                      AXIS_STEP_POOL_CHUNK_BYTES);
+    if (!handle->pool) {
+        logger_fprintf(stderr, "[-] Failed to allocate axis step cache: %s\n", strerror(errno));
+        axis_stepper_diagnostics_destroy(handle->diagnostics);
         close(handle->fd);
         free(handle);
         return NULL;
     }
 
-    error = pthread_cond_init(&handle->space_ready, NULL);
-    if (error) {
-        logger_fprintf(stderr, "[-] Failed to initialize axis FIFO queue condition: %s\n", strerror(error));
-        pthread_cond_destroy(&handle->data_ready);
-        pthread_mutex_destroy(&handle->mutex);
+    if (object_pool_acquire(handle->pool, &producer_batch, 0) != 1) {
+        logger_fprintf(stderr, "[-] Failed to acquire initial axis step batch\n");
+        object_pool_destroy(handle->pool);
+        axis_stepper_diagnostics_destroy(handle->diagnostics);
         close(handle->fd);
         free(handle);
         return NULL;
     }
 
-    handle->diagnostic_timestamp_ns = monotonic_time_ns();
+    handle->producer_batch = producer_batch;
+    size_t pool_used, pool_capacity;
+    object_pool_get_stats(handle->pool, &pool_used, NULL, &pool_capacity);
+    handle->diagnostics_api->queue_depth(handle->diagnostics, pool_used);
+
+    int error = pthread_mutex_init(&handle->startup_mutex, NULL);
+    if (error) {
+        logger_fprintf(stderr, "[-] Failed to initialize stepper startup mutex: %s\n", strerror(error));
+        object_pool_destroy(handle->pool);
+        handle->diagnostics_api->destroy(handle->diagnostics);
+        close(handle->fd);
+        free(handle);
+        return NULL;
+    }
+
+    error = pthread_cond_init(&handle->startup_ready, NULL);
+    if (error) {
+        logger_fprintf(stderr, "[-] Failed to initialize stepper startup condition: %s\n", strerror(error));
+        pthread_mutex_destroy(&handle->startup_mutex);
+        object_pool_destroy(handle->pool);
+        handle->diagnostics_api->destroy(handle->diagnostics);
+        close(handle->fd);
+        free(handle);
+        return NULL;
+    }
+
+    start_output_if_pool_half_full(handle);
+    logger_fprintf(stdout, "[+] Axis step cache: %zu bytes, %zu batches of %u words\n",
+                   object_pool_memory_bytes(handle->pool), pool_capacity, AXIS_FIFO_WRITE_BATCH);
 
     return handle;
 }
@@ -409,8 +376,9 @@ void axis_stepper_close(p_axis_stepper_t handle)
         return;
 
     close(handle->fd);
-    pthread_cond_destroy(&handle->space_ready);
-    pthread_cond_destroy(&handle->data_ready);
-    pthread_mutex_destroy(&handle->mutex);
+    object_pool_destroy(handle->pool);
+    handle->diagnostics_api->destroy(handle->diagnostics);
+    pthread_cond_destroy(&handle->startup_ready);
+    pthread_mutex_destroy(&handle->startup_mutex);
     free(handle);
 }

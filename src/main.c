@@ -153,6 +153,7 @@ static uint8_t socket_input_buffer[SOCKET_INPUT_BUFFER_SIZE];
 static size_t socket_input_offset;
 static size_t socket_input_count;
 static uint64_t socket_next_poll_ns;
+static int socket_peer_closed;
 
 static uint64_t monotonic_time_ns(void)
 {
@@ -182,7 +183,7 @@ uint8_t sim_socket_in()
         socket_next_poll_ns = now + SOCKET_INPUT_POLL_INTERVAL_NS;
         FD_ZERO(&readable);
 
-        if (socket_fd > 0 && sim.socket_fd <= 0) {
+        if (socket_fd > 0 && sim.socket_fd <= 0 && socket_input_count == 0) {
             FD_SET(socket_fd, &readable);
             max_fd = socket_fd;
         }
@@ -194,7 +195,8 @@ uint8_t sim_socket_in()
 
         retval = max_fd >= 0 ? select(max_fd + 1, &readable, NULL, NULL, &timeout) : 0;
 
-        if (retval > 0 && socket_fd > 0 && sim.socket_fd <= 0 && FD_ISSET(socket_fd, &readable)) {
+        if (retval > 0 && socket_fd > 0 && sim.socket_fd <= 0 && socket_input_count == 0 &&
+            FD_ISSET(socket_fd, &readable)) {
             socklen_t addrlen = sizeof(struct sockaddr_in);
             struct sockaddr_in client_addr;
 
@@ -203,6 +205,9 @@ uint8_t sim_socket_in()
                 printf("Fatal: Error on socket accept.\n");
                 exit(-5);
             }
+
+            socket_peer_closed = 0;
+            sim.input_closed = 0;
 
             FD_SET(sim.socket_fd, &rfds);
 
@@ -227,6 +232,7 @@ uint8_t sim_socket_in()
             if (retval > 0) {
                 socket_input_count += (size_t)retval;
             } else if (retval == 0) {
+                socket_peer_closed = 1;
                 close(sim.socket_fd);
                 FD_CLR(sim.socket_fd, &rfds);
                 sim.socket_fd = 0;
@@ -240,6 +246,9 @@ uint8_t sim_socket_in()
         if (socket_input_count == 0)
             socket_input_offset = 0;
     }
+
+    if (socket_peer_closed && socket_input_count == 0)
+        sim.input_closed = 1;
 
     return c;
 }
