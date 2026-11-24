@@ -328,7 +328,7 @@ void mcu_gpio_in (gpio_port_t *port, uint16_t pins, uint16_t mask)
 // TODO: move to mcu_master_clock() above
 void simulate_serial (void)
 {
-    if(!booted)
+    if(!booted || !hal.stream.get_rx_buffer_free)
         return;
 
     if(uart.tx_flag) {

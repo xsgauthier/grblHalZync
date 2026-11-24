@@ -57,10 +57,14 @@ static void report_diagnostics(p_axis_stepper_t handle)
         return;
 
     size_t pool_used, pool_capacity;
+    int buffering;
 
     object_pool_get_stats(handle->pool, &pool_used, NULL, &pool_capacity);
+    pthread_mutex_lock(&handle->startup_mutex);
+    buffering = !handle->output_started;
+    pthread_mutex_unlock(&handle->startup_mutex);
 
-    handle->diagnostics_api->report(handle->diagnostics, pool_used, pool_capacity);
+    handle->diagnostics_api->report(handle->diagnostics, pool_used, pool_capacity, buffering);
 }
 
 static void start_output(p_axis_stepper_t handle)

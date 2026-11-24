@@ -12,6 +12,7 @@
 struct axis_stepper_diagnostics_s {
     pthread_mutex_t mutex;
     uint64_t timestamp_ns;
+    int report_started;
     uint64_t words_written;
     uint64_t producer_waits;
     uint64_t producer_wait_ns;
@@ -90,11 +91,15 @@ static void dummy_words_written(axis_stepper_diagnostics_t diagnostics, size_t c
     (void)count;
 }
 
-static void dummy_report(axis_stepper_diagnostics_t diagnostics, size_t queue_count, size_t queue_capacity)
+static void dummy_report(axis_stepper_diagnostics_t diagnostics,
+                         size_t queue_count,
+                         size_t queue_capacity,
+                         int buffering)
 {
     (void)diagnostics;
     (void)queue_count;
     (void)queue_capacity;
+    (void)buffering;
 }
 
 uint64_t axis_stepper_diagnostics_now_ns(void)
@@ -206,7 +211,8 @@ void axis_stepper_diagnostics_words_written(axis_stepper_diagnostics_t diagnosti
 
 void axis_stepper_diagnostics_report(axis_stepper_diagnostics_t diagnostics,
                                      size_t queue_count,
-                                     size_t queue_capacity)
+                                     size_t queue_capacity,
+                                     int buffering)
 {
     uint64_t now = axis_stepper_diagnostics_now_ns();
     uint64_t words_written, producer_waits, producer_wait_ns, producer_wait_max_ns;
@@ -215,14 +221,18 @@ void axis_stepper_diagnostics_report(axis_stepper_diagnostics_t diagnostics,
     uint64_t write_errors, writer_active_ns;
     size_t queue_high_water;
     int writer_active;
+    unsigned pool_percent;
+
+    pool_percent = queue_capacity ? (unsigned)((queue_count * 100U) / queue_capacity) : 0;
 
     pthread_mutex_lock(&diagnostics->mutex);
-    if (now - diagnostics->timestamp_ns < DIAGNOSTIC_INTERVAL_NS) {
+    if (diagnostics->report_started && now - diagnostics->timestamp_ns < DIAGNOSTIC_INTERVAL_NS) {
         pthread_mutex_unlock(&diagnostics->mutex);
         return;
     }
 
     diagnostics->timestamp_ns = now;
+    diagnostics->report_started = 1;
     words_written = diagnostics->words_written;
     producer_waits = diagnostics->producer_waits;
     producer_wait_ns = diagnostics->producer_wait_ns;
@@ -254,10 +264,11 @@ void axis_stepper_diagnostics_report(axis_stepper_diagnostics_t diagnostics,
     diagnostics->queue_high_water = queue_count;
     pthread_mutex_unlock(&diagnostics->mutex);
 
-    if (words_written || producer_waits || fifo_eagain || fifo_write_calls || write_errors) {
+    if (buffering || words_written || producer_waits || fifo_eagain || fifo_write_calls || write_errors) {
         logger_fprintf(stderr,
-                           "[stepper] pool_used=%zu/%zu high=%zu words=%llu producer_waits=%llu producer_wait_ms=%llu producer_wait_max_ms=%llu fifo_eagain=%llu fifo_wait_ms=%llu fifo_wait_max_ms=%llu write_calls=%llu write_ms=%llu write_max_ms=%llu write_slow=%llu writer_active_ms=%llu errors=%llu\n",
-                       queue_count, queue_capacity, queue_high_water,
+                           "[stepper] phase=%s pool=%zu/%zu (%u%%) high=%zu words=%llu producer_waits=%llu producer_wait_ms=%llu producer_wait_max_ms=%llu fifo_eagain=%llu fifo_wait_ms=%llu fifo_wait_max_ms=%llu write_calls=%llu write_ms=%llu write_max_ms=%llu write_slow=%llu writer_active_ms=%llu errors=%llu\n",
+                       buffering ? "buffering" : "streaming",
+                       queue_count, queue_capacity, pool_percent, queue_high_water,
                        (unsigned long long)words_written,
                        (unsigned long long)producer_waits,
                        (unsigned long long)(producer_wait_ns / 1000000ULL),

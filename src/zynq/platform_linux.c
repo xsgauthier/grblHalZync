@@ -140,15 +140,24 @@ plat_thread_t* platform_start_thread(plat_threadfunc_t threadfunc)
 //ask thread to exit nicely, wait
 void platform_stop_thread(plat_thread_t* th)
 {
+    if (!th)
+        return;
+
     th->exit = 1;
-    pthread_join(th->tid, NULL);  
+    pthread_join(th->tid, NULL);
+    free(th);
 }
 
 //force-kill thread
 void platform_kill_thread(plat_thread_t* th)
 {
+    if (!th)
+        return;
+
     th->exit = 1;
-    pthread_cancel(th->tid); 
+    pthread_cancel(th->tid);
+    pthread_join(th->tid, NULL);
+    free(th);
 }
 
 //return char if one available.

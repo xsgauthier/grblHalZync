@@ -21,7 +21,8 @@ typedef struct {
 	void (*words_written)(axis_stepper_diagnostics_t diagnostics, size_t count);
 	void (*report)(axis_stepper_diagnostics_t diagnostics,
 				   size_t queue_count,
-				   size_t queue_capacity);
+				   size_t queue_capacity,
+				   int buffering);
 } axis_stepper_diagnostics_api_t;
 
 extern const axis_stepper_diagnostics_api_t axis_stepper_diagnostics_default_api;
@@ -44,6 +45,7 @@ void axis_stepper_diagnostics_write_error(axis_stepper_diagnostics_t diagnostics
 void axis_stepper_diagnostics_words_written(axis_stepper_diagnostics_t diagnostics, size_t count);
 void axis_stepper_diagnostics_report(axis_stepper_diagnostics_t diagnostics,
 									size_t queue_count,
-									size_t queue_capacity);
+									size_t queue_capacity,
+									int buffering);
 
 #endif

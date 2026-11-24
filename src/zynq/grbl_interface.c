@@ -44,6 +44,9 @@ static void printBlock(void);
 //on their way out. The state check alone misses dwells, which run in STATE_IDLE.
 bool grbl_is_idle (void)
 {
+    if(hal.stream.get_rx_buffer_count == NULL)
+        return false;
+
     return state_get() < STATE_HOMING &&
             plan_get_current_block() == NULL &&
              !driver_delay_pending() &&

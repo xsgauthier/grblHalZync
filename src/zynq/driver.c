@@ -32,6 +32,7 @@
 // thread would otherwise busy-spin.
 #ifndef WIN32
 #include <sched.h>
+#include <pthread.h>
 #define sim_yield() sched_yield()
 #else
 // SwitchToThread() hands the rest of the timeslice to another ready thread
@@ -443,6 +444,9 @@ void sim_process_realtime (uint_fast16_t state)
 
     sim_yield(); // yield to the simulator thread instead of spinning grbl's main loop at full host speed
     on_execute_realtime(state);
+#ifndef WIN32
+    pthread_testcancel();
+#endif
 }
 
 uint32_t millis (void)
