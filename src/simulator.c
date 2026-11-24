@@ -26,7 +26,13 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+#ifndef WIN32
+#include <errno.h>
+#include <poll.h>
+#include <sys/socket.h>
+#endif
 
 #include "simulator.h"
 #include "eeprom.h"
@@ -207,13 +213,13 @@ void sim_loop (void)
     }
 }
 
-#define SOCKET_BUFFER_LEN (2^11)
+#define SOCKET_BUFFER_LEN (1U << 11)
 
 // Print serial output to args.serial_out_file
 void sim_serial_out (uint8_t data)
 {
     static uint8_t buf[SOCKET_BUFFER_LEN] = {0};
-    static uint8_t len = 0;
+    static size_t len = 0;
     static bool continuation = 0;
 
     buf[len++] = data;
@@ -233,8 +239,7 @@ void sim_serial_out (uint8_t data)
 void sim_socket_out (uint8_t data)
 {
     static uint8_t buf[SOCKET_BUFFER_LEN] = {0};
-    static uint8_t len = 0;
-    static bool continuation = 0;
+    static size_t len = 0;
 
     buf[len++] = data;
     // Send only on '\n' (grblHAL lines end "\r\n") or when the buffer is full,
@@ -252,12 +257,40 @@ void sim_socket_out (uint8_t data)
         }
 #else
         if(sim.socket_fd) {
-            if(write(sim.socket_fd, buf, len) < 0)
-                exit(-10);
+            size_t sent = 0;
+
+            while(sent < len) {
+#ifdef MSG_NOSIGNAL
+                ssize_t result = send(sim.socket_fd, buf + sent, len - sent, MSG_NOSIGNAL);
+#else
+                ssize_t result = send(sim.socket_fd, buf + sent, len - sent, 0);
+#endif
+
+                if(result > 0) {
+                    sent += (size_t)result;
+                } else if(result < 0 && errno == EINTR) {
+                    continue;
+                } else if(result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    struct pollfd writable = { .fd = sim.socket_fd, .events = POLLOUT };
+                    int poll_result = poll(&writable, 1, 1000);
+                    if(poll_result < 0 && errno == EINTR)
+                        continue;
+                    if(poll_result > 0 && (writable.revents & POLLOUT) &&
+                       !(writable.revents & (POLLERR | POLLHUP | POLLNVAL)))
+                        continue;
+                    fprintf(stderr, "Socket send stalled; disconnecting client\n");
+                    close(sim.socket_fd);
+                    sim.socket_fd = 0;
+                    break;
+                } else {
+                    fprintf(stderr, "Socket send failed: %s\n", strerror(errno));
+                    close(sim.socket_fd);
+                    sim.socket_fd = 0;
+                    break;
+                }
+            }
         }
 #endif
-        // don't print comment on next line if we are just printing to avoid buffer overflow
-        continuation = (len >= SOCKET_BUFFER_LEN); 
         len = 0;
     }
 }
