@@ -12,6 +12,7 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
                          uint32_t delay_cycles);
 int axis_stepper_flush(p_axis_stepper_t handle);
 void axis_stepper_input_complete(p_axis_stepper_t handle);
+void axis_stepper_set_feed_hold(p_axis_stepper_t handle, int active);
 void *axis_stepper_writer_thread(void *arg);
 void axis_stepper_stop(p_axis_stepper_t handle);
 void axis_stepper_close(p_axis_stepper_t handle);

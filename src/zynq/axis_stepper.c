@@ -43,6 +43,7 @@ struct axis_stepper_s {
     size_t producer_count;
     int stopping;
     int output_started;
+    int feed_hold;
     pthread_mutex_t startup_mutex;
     pthread_cond_t startup_ready;
     int last_error;
@@ -75,6 +76,15 @@ static void start_output(p_axis_stepper_t handle)
         pthread_cond_broadcast(&handle->startup_ready);
     }
     pthread_mutex_unlock(&handle->startup_mutex);
+}
+
+static int wait_for_writer(p_axis_stepper_t handle)
+{
+    pthread_mutex_lock(&handle->startup_mutex);
+    while (!handle->stopping && (!handle->output_started || handle->feed_hold))
+        pthread_cond_wait(&handle->startup_ready, &handle->startup_mutex);
+    pthread_mutex_unlock(&handle->startup_mutex);
+    return 1;
 }
 
 static void start_output_if_pool_half_full(p_axis_stepper_t handle)
@@ -144,6 +154,9 @@ static void write_all(p_axis_stepper_t handle, const uint32_t *words, size_t cou
     size_t bytes_remaining = count * sizeof(*words);
 
     while (bytes_remaining > 0) {
+        if (!wait_for_writer(handle))
+            return;
+
         handle->diagnostics_api->write_begin(handle->diagnostics);
         ssize_t bytes_written = write(handle->fd, data, bytes_remaining);
         handle->diagnostics_api->write_end(handle->diagnostics);
@@ -245,6 +258,20 @@ void axis_stepper_input_complete(p_axis_stepper_t handle)
         start_output(handle);
 }
 
+void axis_stepper_set_feed_hold(p_axis_stepper_t handle, int active)
+{
+    if (!handle)
+        return;
+
+    pthread_mutex_lock(&handle->startup_mutex);
+    if (handle->feed_hold != (active != 0)) {
+        handle->feed_hold = active != 0;
+        if (!handle->feed_hold)
+            pthread_cond_broadcast(&handle->startup_ready);
+    }
+    pthread_mutex_unlock(&handle->startup_mutex);
+}
+
 void *axis_stepper_writer_thread(void *arg)
 {
     p_axis_stepper_t handle = arg;
@@ -281,9 +308,13 @@ void axis_stepper_stop(p_axis_stepper_t handle)
     if (!handle)
         return;
 
+    pthread_mutex_lock(&handle->startup_mutex);
     handle->stopping = 1;
+    handle->feed_hold = 0;
+    handle->output_started = 1;
+    pthread_cond_broadcast(&handle->startup_ready);
+    pthread_mutex_unlock(&handle->startup_mutex);
     publish_producer_batch(handle);
-    start_output(handle);
     object_pool_stop(handle->pool);
 }
 

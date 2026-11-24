@@ -41,6 +41,7 @@ typedef struct sim_vars {
     volatile uint8_t input_closed; // input source reached EOF after buffered input was delivered
     volatile uint8_t input_received; // non-whitespace program data accepted by the GRBL RX buffer
     volatile uint32_t last_input_ns; // monotonic time of the last accepted program byte
+    volatile uint8_t feed_hold_active;
     enum {exit_NO, exit_REQ, exit_OK} exit;
     float speedup; // current factor how much faster/slower sim time is compared to real time
     int32_t baud_ticks;

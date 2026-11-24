@@ -31,10 +31,12 @@
 #include "grbl_interface.h"
 #include "axis_stepper.h"
 #include "logger.h"
+#include "grbl/state_machine.h"
 
 #define STEPPER_STARTUP_INPUT_IDLE_NS 1000000000U
 
 static volatile p_axis_stepper_t stepper_handle = NULL;
+static uint32_t feed_hold_started_ns;
 
 static volatile bool irq_enable = false;
 static volatile bool booted = false;
@@ -91,6 +93,9 @@ void mcu_reset (void)
     sim.input_closed = 0;
     sim.input_received = 0;
     sim.last_input_ns = 0;
+    sim.feed_hold_active = 0;
+    feed_hold_started_ns = 0;
+    axis_stepper_set_feed_hold(stepper_handle, false);
     // all timers/gpio just zeroed - reset the fast-path caches to match
     timer_enabled_mask = 0;
     gpio_irq_pending = false;
@@ -135,9 +140,27 @@ void mcu_master_clock (void)
     if(!booted)
         return;
 
+    bool feed_hold_active = (state_get() & (STATE_HOLD | STATE_SAFETY_DOOR)) != 0;
+    if(feed_hold_active != (sim.feed_hold_active != 0)) {
+        uint32_t now = platform_ns();
+        if(feed_hold_active) {
+            feed_hold_started_ns = now;
+            sim.feed_hold_active = 1;
+        } else {
+            if(sim.input_received) {
+                if(feed_hold_started_ns)
+                    sim.last_input_ns += now - feed_hold_started_ns;
+                else
+                    sim.last_input_ns = now;
+            }
+            sim.feed_hold_active = 0;
+        }
+        axis_stepper_set_feed_hold(stepper_handle, feed_hold_active);
+    }
+
     if(stepper_handle && hal.stream.get_rx_buffer_count &&
        hal.stream.get_rx_buffer_count() == 0 &&
-    sim.input_received && (sim.input_closed ||
+       !feed_hold_active && sim.input_received && (sim.input_closed ||
      (uint32_t)(platform_ns() - sim.last_input_ns) >= STEPPER_STARTUP_INPUT_IDLE_NS))
         axis_stepper_input_complete(stepper_handle);
 
