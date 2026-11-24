@@ -126,6 +126,9 @@ void sim_loop (void)
     uint64_t ticks_per_frame = F_CPU / 100; // start simulating a few ticks before entering the control loop
     uint64_t target_ticks = ticks_per_frame;
     uint32_t ns_prev = platform_ns();
+    uint32_t diagnostic_ns = ns_prev;
+    uint32_t last_grbl_pulse = sim.grbl_pulse;
+    uint64_t serial_poll_slots = 0;
     uint64_t next_byte_tick = sim.masterclock;
 
     while (sim.exit != exit_OK  ) { //don't quit until idle
@@ -170,6 +173,7 @@ void sim_loop (void)
             sim.on_tick();
 
             if (read_serial) {
+                serial_poll_slots++;
                 // baud rate is for symbols and UART has 1 bit per symbol.
                 // with a typical 8N1 serial, we need 10 symbols per byte
                 next_byte_tick += sim.baud_ticks * 10;
@@ -187,6 +191,36 @@ void sim_loop (void)
         uint32_t ns_elapsed = (ns_now - ns_prev);
         if (ns_elapsed == 0)
             ns_elapsed = 1;
+
+        if ((uint32_t)(ns_now - diagnostic_ns) >= 1000000000U) {
+            uint32_t grbl_pulse = sim.grbl_pulse;
+            uint64_t ticks_to_byte = next_byte_tick > sim.masterclock
+                ? next_byte_tick - sim.masterclock : 0;
+#ifdef WIN32
+            int socket_connected = sim.socket_fd != INVALID_SOCKET;
+#else
+            int socket_connected = sim.socket_fd > 0;
+#endif
+
+            fprintf(stderr,
+                    "[sim] tick=%llu next_byte=%llu ticks_to_byte=%llu serial_slots=%llu grbl_pulse=%u pulse_delta=%u socket=%d input=%u closed=%u hold=%u\n",
+                    (unsigned long long)sim.masterclock,
+                    (unsigned long long)next_byte_tick,
+                    (unsigned long long)ticks_to_byte,
+                    (unsigned long long)serial_poll_slots,
+                    grbl_pulse,
+                    grbl_pulse - last_grbl_pulse,
+                    socket_connected,
+                    sim.input_received,
+                    sim.input_closed,
+                    sim.feed_hold_active);
+            fflush(stderr);
+
+            diagnostic_ns = ns_now;
+            last_grbl_pulse = grbl_pulse;
+            serial_poll_slots = 0;
+        }
+
         ns_prev = ns_now;
         uint32_t rt_ticks_per_frame = F_CPU / 1e9 * ns_elapsed;
         sim.speedup = (double)ticks_per_frame / rt_ticks_per_frame;
