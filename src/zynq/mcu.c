@@ -263,6 +263,8 @@ void mcu_skip_ticks (uint32_t ticks)
 void mcu_gpio_set (gpio_port_t *port, uint16_t pins, uint16_t mask)
 {
     uint64_t this_tick;
+    bool step_updated = false;
+
     if (stepper_handle) {
         this_tick = sim.masterclock;
         if (port == &gpio[DIR_PORT]) {
@@ -271,9 +273,10 @@ void mcu_gpio_set (gpio_port_t *port, uint16_t pins, uint16_t mask)
         } else if (port == &gpio[STEP_PORT]) {
             step_delta.step = (pins & mask);
             step_delta.has_step = 1;
+            step_updated = true;
         }
 
-        if (step_delta.has_direction && step_delta.has_step
+        if (step_updated && step_delta.has_direction && step_delta.has_step
              && step_delta.step) {
             if (step_delta.last_tick == 0) {
                 step_delta.this_tick = step_delta.last_tick = this_tick;
