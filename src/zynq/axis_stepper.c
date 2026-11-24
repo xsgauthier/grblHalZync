@@ -2,6 +2,7 @@
 #include "axis_stepper_diagnostics.h"
 #include "logger.h"
 #include "object_pool.h"
+#include "simulator.h"
 
 #include <errno.h>
 #include <fcntl.h>
