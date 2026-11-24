@@ -88,6 +88,9 @@ void mcu_reset (void)
     memset(&systick_timer, 0, sizeof(mcu_timer_t));
     memset(&gpio, 0, sizeof(gpio_port_t) * MCU_N_GPIO);
     memset(&step_delta, 0, sizeof(struct step_delta_s));
+    sim.input_closed = 0;
+    sim.input_received = 0;
+    sim.last_input_ns = 0;
     // all timers/gpio just zeroed - reset the fast-path caches to match
     timer_enabled_mask = 0;
     gpio_irq_pending = false;
@@ -134,8 +137,8 @@ void mcu_master_clock (void)
 
     if(stepper_handle && hal.stream.get_rx_buffer_count &&
        hal.stream.get_rx_buffer_count() == 0 &&
-       (sim.input_closed || (sim.input_received &&
-        (uint32_t)(platform_ns() - sim.last_input_ns) >= STEPPER_STARTUP_INPUT_IDLE_NS)))
+    sim.input_received && (sim.input_closed ||
+     (uint32_t)(platform_ns() - sim.last_input_ns) >= STEPPER_STARTUP_INPUT_IDLE_NS))
         axis_stepper_input_complete(stepper_handle);
 
     if (grbl_is_idle()) {

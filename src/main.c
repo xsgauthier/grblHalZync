@@ -208,6 +208,8 @@ uint8_t sim_socket_in()
 
             socket_peer_closed = 0;
             sim.input_closed = 0;
+            sim.input_received = 0;
+            sim.last_input_ns = 0;
 
             FD_SET(sim.socket_fd, &rfds);
 
