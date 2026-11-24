@@ -282,8 +282,10 @@ void axis_stepper_input_complete(p_axis_stepper_t handle)
 
 void axis_stepper_start_output(p_axis_stepper_t handle)
 {
-    if (handle)
-    force_start_output(handle);
+    size_t pool_used, pool_capacity;
+    object_pool_get_stats(handle->pool, &pool_used, NULL, &pool_capacity);
+    if (handle && pool_used > 0)
+        force_start_output(handle);
 }
 
 void axis_stepper_set_feed_hold(p_axis_stepper_t handle, int active)
