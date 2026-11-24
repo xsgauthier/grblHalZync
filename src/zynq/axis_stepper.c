@@ -287,6 +287,11 @@ void *axis_stepper_writer_thread(void *arg)
     pthread_mutex_unlock(&handle->startup_mutex);
 
     for (;;) {
+        if (handle->feed_hold)
+        {
+            sim_yield();
+            continue;
+        }
         axis_step_batch_t *batch = NULL;
         int result = object_pool_take(handle->pool, (void **)&batch);
 
