@@ -368,18 +368,14 @@ void simulate_serial (void)
     if((uart.tx_irq = uart.tx_irq_enable))
         isr[UART_IRQ]();
 
-    // Deliver at most one byte per grbl main-loop pass (see sim_process_realtime):
-    // a pulse of 0 means the grbl thread is still booting and would flush the input,
-    // an unchanged pulse means it has not run since the previous byte - skip this
-    // byte slot and try again at the next one, no input is lost.
-    static uint32_t pulse_seen = 0;
-
-    if(sim.grbl_pulse != pulse_seen && uart.rx_irq_enable && !uart.rx_irq && hal.stream.get_rx_buffer_free() > 1) {
+    // The RX ring provides backpressure if the GRBL thread falls behind. Do not
+    // gate socket polling on grbl_pulse: the heartbeat may not advance until the
+    // first input is received, which would otherwise prevent accepting a client.
+    if(uart.rx_irq_enable && !uart.rx_irq && hal.stream.get_rx_buffer_free() > 1) {
         uint8_t char_in = sim.getchar();
         if (char_in == 0xFF) {
             sim.input_closed = 1;
         } else if (char_in) {
-            pulse_seen = sim.grbl_pulse;
             uart.rx_data = char_in;
             uart.rx_irq = 1;
             isr[UART_IRQ]();
