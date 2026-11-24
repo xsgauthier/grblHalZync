@@ -196,6 +196,8 @@ static void uart_interrupt_handler (void)
             if(data == 0x06)
                 sim.exit = exit_REQ;
             if(!enqueue_realtime_command((uint8_t)data)) {
+                sim.input_received = 1;
+                sim.last_input_ns = platform_ns();
                 rxbuffer.data[rxbuffer.head] = (uint8_t)data;  	// Add data to buffer
                 atomic_thread_fence(memory_order_release);      // making sure it is visible before the head pointer (serialGetC reads it on the grbl thread)
                 rxbuffer.head = bptr;                       	// and update pointer

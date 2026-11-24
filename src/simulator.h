@@ -39,8 +39,8 @@ typedef struct sim_vars {
     uint8_t started;  // don't start timers until first char recieved.
     volatile uint32_t grbl_pulse; // grbl thread main-loop heartbeat; 0 until the boot sequence (which flushes the input stream) is done
     volatile uint8_t input_closed; // input source reached EOF after buffered input was delivered
-    volatile uint8_t input_received;
-    volatile uint32_t last_input_ns;
+    volatile uint8_t input_received; // non-realtime program data accepted by the GRBL RX buffer
+    volatile uint32_t last_input_ns; // monotonic time of the last accepted program byte
     enum {exit_NO, exit_REQ, exit_OK} exit;
     float speedup; // current factor how much faster/slower sim time is compared to real time
     int32_t baud_ticks;

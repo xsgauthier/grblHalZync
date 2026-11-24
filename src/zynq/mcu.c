@@ -353,8 +353,6 @@ void simulate_serial (void)
         if (char_in == 0xFF) {
             sim.input_closed = 1;
         } else if (char_in) {
-            sim.input_received = 1;
-            sim.last_input_ns = platform_ns();
             pulse_seen = sim.grbl_pulse;
             uart.rx_data = char_in;
             uart.rx_irq = 1;
