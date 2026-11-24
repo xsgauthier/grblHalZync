@@ -102,6 +102,11 @@ static uint64_t scale_ticks_per_frame (uint64_t ticks, double factor, uint64_t m
 // Runs the hardware simulator at the desired rate until sim.exit is set
 void sim_loop (void)
 {
+    bool first_tick_reported = false;
+
+    fprintf(stderr, "[sim] sim_loop entered\n");
+    fflush(stderr);
+
     // Control frame length trades throughput overhead against interactive
     // latency: serial input is only polled during a frame's simulation burst,
     // so a byte arriving while we sleep waits for the next frame - the frame
@@ -121,7 +126,7 @@ void sim_loop (void)
     uint64_t ticks_per_frame = F_CPU / 100; // start simulating a few ticks before entering the control loop
     uint64_t target_ticks = ticks_per_frame;
     uint32_t ns_prev = platform_ns();
-    uint64_t next_byte_tick = F_CPU;   //wait 1 sec (sim time) before reading IO.
+    uint64_t next_byte_tick = sim.masterclock;
 
     while (sim.exit != exit_OK  ) { //don't quit until idle
         while (sim.masterclock < target_ticks) {
@@ -153,6 +158,13 @@ void sim_loop (void)
 
             // do low level hardware
             simulate_hardware(read_serial);
+
+            if (!first_tick_reported) {
+                fprintf(stderr, "[sim] first hardware tick: %llu\n",
+                        (unsigned long long)sim.masterclock);
+                fflush(stderr);
+                first_tick_reported = true;
+            }
 
             // do app-specific per-tick processing
             sim.on_tick();
