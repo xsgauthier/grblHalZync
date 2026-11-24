@@ -391,6 +391,11 @@ static void *mcu_io_thread (void *arg)
     return axis_stepper_writer_thread(stepper_handle);
 }
 
+void mcu_stepper_start_output (void)
+{
+    axis_stepper_start_output(stepper_handle);
+}
+
 void mcu_setup_io_thread(void)
 {
     stepper_handle = axis_stepper_initialize();

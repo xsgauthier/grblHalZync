@@ -80,6 +80,17 @@ static void start_output(p_axis_stepper_t handle)
     pthread_mutex_unlock(&handle->startup_mutex);
 }
 
+static void force_start_output(p_axis_stepper_t handle)
+{
+    pthread_mutex_lock(&handle->startup_mutex);
+    if (!handle->stopping && !handle->feed_hold) {
+        handle->refill_after_hold = 0;
+        handle->output_started = 1;
+        pthread_cond_broadcast(&handle->startup_ready);
+    }
+    pthread_mutex_unlock(&handle->startup_mutex);
+}
+
 static int wait_for_writer(p_axis_stepper_t handle)
 {
     pthread_mutex_lock(&handle->startup_mutex);
@@ -267,6 +278,12 @@ void axis_stepper_input_complete(p_axis_stepper_t handle)
 {
     if (handle)
         start_output(handle);
+}
+
+void axis_stepper_start_output(p_axis_stepper_t handle)
+{
+    if (handle)
+    force_start_output(handle);
 }
 
 void axis_stepper_set_feed_hold(p_axis_stepper_t handle, int active)

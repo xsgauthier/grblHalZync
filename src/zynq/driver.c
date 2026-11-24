@@ -51,6 +51,7 @@
 #include "platform.h"
 
 #include "grbl/hal.h"
+#include "grbl/gcode.h"
 
 #ifndef SQUARING_ENABLED
 #define SQUARING_ENABLED 0
@@ -433,6 +434,9 @@ bool driver_setup (settings_t *settings)
 // ensures hardware simulator gets some cycles in "parallel"
 void sim_process_realtime (uint_fast16_t state)
 {
+    if(gc_state.modal.program_flow == ProgramFlow_Paused)
+        mcu_stepper_start_output();
+
     // heartbeat for the simulator thread: the boot sequence (which flushes the
     // input stream) is done and the main loop has run since the last beat.
     // The serial feed is paced against it so a burst of simulated time cannot

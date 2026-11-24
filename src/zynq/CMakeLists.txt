@@ -12,3 +12,4 @@ target_sources(zynq INTERFACE
 )
 
 target_include_directories(zynq INTERFACE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_definitions(zynq INTERFACE ZYNQ_FIFO_STEPPER)
