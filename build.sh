@@ -36,9 +36,8 @@ fi
 
 git pull
 
-mkdir build
-cd build
-cmake ..
+[ -d build ] && mkdir build
+cmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
 make -j 6 grblHAL_zynq
 
