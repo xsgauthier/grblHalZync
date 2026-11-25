@@ -10,6 +10,10 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
                          uint32_t step_mask,
                          uint32_t dir_mask,
                          uint32_t delay_cycles);
+int axis_ioexpander_outputs_enqueue(p_axis_stepper_t handle, 
+    uint16_t pcf_address, 
+    uint16_t value);
+
 int axis_stepper_flush(p_axis_stepper_t handle);
 void axis_stepper_input_complete(p_axis_stepper_t handle);
 void axis_stepper_start_output(p_axis_stepper_t handle);

@@ -300,6 +300,8 @@ void mcu_gpio_set (gpio_port_t *port, uint16_t pins, uint16_t mask)
             step_delta.step = (pins & mask);
             step_delta.has_step = 1;
             step_updated = true;
+        } else if (port == &gpio[OUTPUTS_PORT]) {
+            axis_ioexpander_outputs_enqueue(stepper_handle, 0, (port->state.value & ~mask) | (pins & mask));
         }
 
         if (step_updated && step_delta.has_direction && step_delta.has_step

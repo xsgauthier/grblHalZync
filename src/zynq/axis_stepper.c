@@ -23,6 +23,12 @@
 #define AXIS_DIAGNOSTIC_WAIT_NS 100000000L
 
 #define ROUTER_BITS 2 // AXI-Stream embedded router
+#define ROUTER_POS  (32-ROUTER_BITS)
+#define ROUTER_MASK ((1U << ROUTER_BITS) - 1U)
+
+#define ROUTER_STEPPER_PORT 0
+#define ROUTER_OUTPUTS_PORT 1
+
 #define NUM_AXES 3
 #define NUM_AXES_MASK ((1U << NUM_AXES) - 1U)
 #define DELAY_BITS (32-ROUTER_BITS-(2*NUM_AXES))
@@ -242,7 +248,9 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
 
     uint32_t word = (delay_cycles & DELAY_MASK)
         | ((step_mask & NUM_AXES_MASK) << ENABLE_POS)
-        | ((dir_mask & NUM_AXES_MASK) << DIRECTION_POS);
+        | ((dir_mask & NUM_AXES_MASK) << DIRECTION_POS)
+        | ((ROUTER_STEPPER_PORT & ROUTER_MASK) << ROUTER_POS)
+        ;
 
     if (handle->stopping) {
         errno = ECANCELED;
@@ -263,6 +271,46 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
 
     return 0;
 }
+
+#define IOEXPANDER_IO_BITS 16
+#define IOEXPANDER_IO_POS (0)
+#define IOEXPANDER_IO_MASK ((1U << IOEXPANDER_IO_BITS) - 1U)
+
+#define IOEXPANDER_ADDR_BITS 3
+#define IOEXPANDER_ADDR_POS (IOEXPANDER_IO_POS+IOEXPANDER_IO_BITS)
+#define IOEXPANDER_ADDR_MASK ((1U << IOEXPANDER_ADDR_BITS) - 1U)
+
+int axis_ioexpander_outputs_enqueue(p_axis_stepper_t handle, uint16_t pcf_address, uint16_t value)
+{
+    if (!handle)
+        return -1;
+
+    uint32_t word = 0U
+        | ((pcf_address & IOEXPANDER_ADDR_MASK) << IOEXPANDER_ADDR_POS)
+        | ((value & IOEXPANDER_IO_MASK) << IOEXPANDER_IO_POS)
+        | ((ROUTER_OUTPUTS_PORT & ROUTER_MASK) << ROUTER_POS)
+        ;
+
+    if (handle->stopping) {
+        errno = ECANCELED;
+        return -1;
+    }
+
+    handle->producer_batch->words[handle->producer_count++] = word;
+    if (handle->producer_count == AXIS_FIFO_WRITE_BATCH) {
+        if (publish_producer_batch(handle) < 0) {
+            errno = ECANCELED;
+            return -1;
+        }
+        if (wait_for_free_batch(handle) < 0) {
+            errno = ECANCELED;
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 
 int axis_stepper_flush(p_axis_stepper_t handle)
 {

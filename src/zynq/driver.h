@@ -64,6 +64,7 @@
 #define SPINDLE_PORT 4
 #define COOLANT_PORT 4
 #define STEPPER_ENABLE_PORT 4
+#define OUTPUTS_PORT 4
 
 #define X_ENABLE_PIN 0
 #define Y_ENABLE_PIN 1
