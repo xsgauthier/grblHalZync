@@ -22,13 +22,15 @@
 #define AXIS_FIFO_RETRY_DELAY_NS 10000000L
 #define AXIS_DIAGNOSTIC_WAIT_NS 100000000L
 
-#define DELAY_BITS 26
-#define DELAY_MASK ((1U << DELAY_BITS) - 1U)
+#define ROUTER_BITS 2 // AXI-Stream embedded router
 #define NUM_AXES 3
 #define NUM_AXES_MASK ((1U << NUM_AXES) - 1U)
+#define DELAY_BITS (32-ROUTER_BITS-(2*NUM_AXES))
+#define DELAY_MASK ((1U << DELAY_BITS) - 1U)
 #define ENABLE_POS DELAY_BITS
 #define DIRECTION_POS (ENABLE_POS + NUM_AXES)
-#define MIN_DELAY_CYCLES 4200
+#define STEP_PRESCALER 125U
+#define MIN_DELAY_CYCLES (4200U)
 #define MAX_DELAY_CYCLES ((1U << DELAY_BITS) - 1U)
 
 #define DELAY_SCALING (50000000U / F_CPU)
@@ -228,13 +230,15 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
     if (!handle)
         return -1;
 
-    delay_cycles *= DELAY_SCALING;
+    delay_cycles *= DELAY_SCALING; // Compensate for clock differences
+    if (delay_cycles < MIN_DELAY_CYCLES)
+        delay_cycles = MIN_DELAY_CYCLES;
+
+    delay_cycles /= STEP_PRESCALER; // Compensate for inter prescaler
     if (delay_cycles > MAX_DELAY_CYCLES) {
         logger_fprintf(stderr, "[-] WARN: Delay is outside the FIFO format, clipping at %u.\n", MAX_DELAY_CYCLES);
         delay_cycles = MAX_DELAY_CYCLES;
     }
-    if (delay_cycles < MIN_DELAY_CYCLES)
-        delay_cycles = MIN_DELAY_CYCLES;
 
     uint32_t word = (delay_cycles & DELAY_MASK)
         | ((step_mask & NUM_AXES_MASK) << ENABLE_POS)
