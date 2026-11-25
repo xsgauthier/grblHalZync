@@ -54,6 +54,7 @@ struct axis_stepper_s {
     int output_started;
     int feed_hold;
     int refill_after_hold;
+    pthread_mutex_t producer_mutex;
     pthread_mutex_t startup_mutex;
     pthread_cond_t startup_ready;
     int last_error;
@@ -252,7 +253,9 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
         | ((ROUTER_STEPPER_PORT & ROUTER_MASK) << ROUTER_POS)
         ;
 
+    pthread_mutex_lock(&handle->producer_mutex);
     if (handle->stopping) {
+        pthread_mutex_unlock(&handle->producer_mutex);
         errno = ECANCELED;
         return -1;
     }
@@ -260,15 +263,18 @@ int axis_stepper_enqueue(p_axis_stepper_t handle,
     handle->producer_batch->words[handle->producer_count++] = word;
     if (handle->producer_count == AXIS_FIFO_WRITE_BATCH) {
         if (publish_producer_batch(handle) < 0) {
+            pthread_mutex_unlock(&handle->producer_mutex);
             errno = ECANCELED;
             return -1;
         }
         if (wait_for_free_batch(handle) < 0) {
+            pthread_mutex_unlock(&handle->producer_mutex);
             errno = ECANCELED;
             return -1;
         }
     }
 
+    pthread_mutex_unlock(&handle->producer_mutex);
     return 0;
 }
 
@@ -291,7 +297,9 @@ int axis_ioexpander_outputs_enqueue(p_axis_stepper_t handle, uint16_t pcf_addres
         | ((ROUTER_OUTPUTS_PORT & ROUTER_MASK) << ROUTER_POS)
         ;
 
+    pthread_mutex_lock(&handle->producer_mutex);
     if (handle->stopping) {
+        pthread_mutex_unlock(&handle->producer_mutex);
         errno = ECANCELED;
         return -1;
     }
@@ -299,15 +307,18 @@ int axis_ioexpander_outputs_enqueue(p_axis_stepper_t handle, uint16_t pcf_addres
     handle->producer_batch->words[handle->producer_count++] = word;
     if (handle->producer_count == AXIS_FIFO_WRITE_BATCH) {
         if (publish_producer_batch(handle) < 0) {
+            pthread_mutex_unlock(&handle->producer_mutex);
             errno = ECANCELED;
             return -1;
         }
         if (wait_for_free_batch(handle) < 0) {
+            pthread_mutex_unlock(&handle->producer_mutex);
             errno = ECANCELED;
             return -1;
         }
     }
 
+    pthread_mutex_unlock(&handle->producer_mutex);
     return 0;
 }
 
@@ -317,12 +328,17 @@ int axis_stepper_flush(p_axis_stepper_t handle)
     if (!handle)
         return -1;
 
+    pthread_mutex_lock(&handle->producer_mutex);
     if (!handle->stopping && handle->producer_count) {
-        if (publish_producer_batch(handle) < 0)
+        if (publish_producer_batch(handle) < 0) {
+            pthread_mutex_unlock(&handle->producer_mutex);
             return -1;
+        }
         int result = wait_for_free_batch(handle);
+        pthread_mutex_unlock(&handle->producer_mutex);
         return result;
     }
+    pthread_mutex_unlock(&handle->producer_mutex);
     return 0;
 }
 
@@ -393,13 +409,18 @@ void axis_stepper_stop(p_axis_stepper_t handle)
         return;
 
     pthread_mutex_lock(&handle->startup_mutex);
-    handle->stopping = 1;
     handle->feed_hold = 0;
     handle->output_started = 1;
     pthread_cond_broadcast(&handle->startup_ready);
     pthread_mutex_unlock(&handle->startup_mutex);
+    pthread_mutex_lock(&handle->producer_mutex);
+    pthread_mutex_lock(&handle->startup_mutex);
+    handle->stopping = 1;
+    pthread_cond_broadcast(&handle->startup_ready);
+    pthread_mutex_unlock(&handle->startup_mutex);
     publish_producer_batch(handle);
     object_pool_stop(handle->pool);
+    pthread_mutex_unlock(&handle->producer_mutex);
 }
 
 p_axis_stepper_t axis_stepper_initialize(void)
@@ -461,9 +482,20 @@ p_axis_stepper_t axis_stepper_initialize(void)
     object_pool_get_stats(handle->pool, &pool_used, NULL, &pool_capacity);
     handle->diagnostics_api->queue_depth(handle->diagnostics, pool_used);
 
-    int error = pthread_mutex_init(&handle->startup_mutex, NULL);
+    int error = pthread_mutex_init(&handle->producer_mutex, NULL);
+    if (error) {
+        logger_fprintf(stderr, "[-] Failed to initialize stepper producer mutex: %s\n", strerror(error));
+        object_pool_destroy(handle->pool);
+        handle->diagnostics_api->destroy(handle->diagnostics);
+        close(handle->fd);
+        free(handle);
+        return NULL;
+    }
+
+    error = pthread_mutex_init(&handle->startup_mutex, NULL);
     if (error) {
         logger_fprintf(stderr, "[-] Failed to initialize stepper startup mutex: %s\n", strerror(error));
+        pthread_mutex_destroy(&handle->producer_mutex);
         object_pool_destroy(handle->pool);
         handle->diagnostics_api->destroy(handle->diagnostics);
         close(handle->fd);
@@ -475,6 +507,7 @@ p_axis_stepper_t axis_stepper_initialize(void)
     if (error) {
         logger_fprintf(stderr, "[-] Failed to initialize stepper startup condition: %s\n", strerror(error));
         pthread_mutex_destroy(&handle->startup_mutex);
+        pthread_mutex_destroy(&handle->producer_mutex);
         object_pool_destroy(handle->pool);
         handle->diagnostics_api->destroy(handle->diagnostics);
         close(handle->fd);
@@ -499,5 +532,6 @@ void axis_stepper_close(p_axis_stepper_t handle)
     handle->diagnostics_api->destroy(handle->diagnostics);
     pthread_cond_destroy(&handle->startup_ready);
     pthread_mutex_destroy(&handle->startup_mutex);
+    pthread_mutex_destroy(&handle->producer_mutex);
     free(handle);
 }
