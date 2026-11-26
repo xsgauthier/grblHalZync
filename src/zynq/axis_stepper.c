@@ -297,6 +297,8 @@ int axis_ioexpander_outputs_enqueue(p_axis_stepper_t handle, uint16_t pcf_addres
         | ((ROUTER_OUTPUTS_PORT & ROUTER_MASK) << ROUTER_POS)
         ;
 
+    logger_fprintf(stderr, "Packed word: 0x%08" PRIx32 " (%" PRIu32 ")\n", word, word);
+
     pthread_mutex_lock(&handle->producer_mutex);
     if (handle->stopping) {
         pthread_mutex_unlock(&handle->producer_mutex);
