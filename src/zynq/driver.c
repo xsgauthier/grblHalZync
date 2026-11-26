@@ -343,7 +343,8 @@ static bool spindleConfig (spindle_ptrs_t *spindle)
 
 static void coolantSetState (coolant_state_t mode)
 {
-    mcu_gpio_set(&gpio[COOLANT_PORT], mode.value ^ settings.coolant.invert.mask, COOLANT_MASK);
+    uint16_t pins = (mode.value ^ settings.coolant.invert.mask) << COOLANT_FLOOD_PIN;
+    mcu_gpio_set(&gpio[COOLANT_PORT], pins, COOLANT_MASK);
 }
 
 static coolant_state_t coolantGetState (void)
