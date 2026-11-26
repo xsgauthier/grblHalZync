@@ -290,14 +290,15 @@ int axis_ioexpander_outputs_enqueue(p_axis_stepper_t handle, uint16_t pcf_addres
 {
     if (!handle)
         return -1;
-
+    // [0100AAA0][P0X][P1X]
+    uint16_t swapped_value = (uint16_t)(((value & 0x00FFU) << 8U) | ((value & 0xFF00U) >> 8U));
     uint32_t word = 0U
         | ((pcf_address & IOEXPANDER_ADDR_MASK) << IOEXPANDER_ADDR_POS)
-        | ((value & IOEXPANDER_IO_MASK) << IOEXPANDER_IO_POS)
         | ((ROUTER_OUTPUTS_PORT & ROUTER_MASK) << ROUTER_POS)
+        | ((swapped_value & IOEXPANDER_IO_MASK) << IOEXPANDER_IO_POS)
         ;
 
-    logger_fprintf(stderr, "Packed word: 0x%08" PRIx32 " (%" PRIu32 ")\n", word, word);
+    //logger_fprintf(stderr, "Packed word: 0x%08" PRIx32 " (%" PRIu32 ")\n", word, word);
 
     pthread_mutex_lock(&handle->producer_mutex);
     if (handle->stopping) {
