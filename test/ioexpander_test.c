@@ -161,7 +161,8 @@ int main(int argc, char **argv)
     uint32_t seq[18];
     size_t seq_len = 0;
     for (unsigned bit = 0; bit < 16U; ++bit) {
-        seq[seq_len++] = make_ioexpander_word(0x0U, (uint16_t)(1U << bit));
+        seq[seq_len++] = make_ioexpander_word(0x0U, (uint16_t)(1U << bit))
+            | ((1U << (bit >> 1U)) << 19U);
     }
     seq[seq_len++] = make_ioexpander_word(0x0U, 0x0000U);
     seq[seq_len++] = make_ioexpander_word(0x0U, 0xFFFFU);

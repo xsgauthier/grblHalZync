@@ -104,7 +104,7 @@ void sim_loop (void)
 {
     bool first_tick_reported = false;
 
-    fprintf(stderr, "[sim] sim_loop entered\n");
+    //fprintf(stderr, "[sim] sim_loop entered\n");
     fflush(stderr);
 
     // Control frame length trades throughput overhead against interactive
@@ -162,12 +162,12 @@ void sim_loop (void)
             // do low level hardware
             simulate_hardware(read_serial);
 
-            if (!first_tick_reported) {
-                fprintf(stderr, "[sim] first hardware tick: %llu\n",
-                        (unsigned long long)sim.masterclock);
-                fflush(stderr);
-                first_tick_reported = true;
-            }
+            //if (!first_tick_reported) {
+            //    fprintf(stderr, "[sim] first hardware tick: %llu\n",
+            //            (unsigned long long)sim.masterclock);
+            //    fflush(stderr);
+            //    first_tick_reported = true;
+            //}
 
             // do app-specific per-tick processing
             sim.on_tick();
@@ -201,7 +201,7 @@ void sim_loop (void)
 #else
             int socket_connected = sim.socket_fd > 0;
 #endif
-
+/*
             fprintf(stderr,
                     "[sim] tick=%llu next_byte=%llu ticks_to_byte=%llu serial_slots=%llu grbl_pulse=%u pulse_delta=%u socket=%d input=%u closed=%u hold=%u\n",
                     (unsigned long long)sim.masterclock,
@@ -214,7 +214,7 @@ void sim_loop (void)
                     sim.input_received,
                     sim.input_closed,
                     sim.feed_hold_active);
-            fflush(stderr);
+            fflush(stderr);*/
 
             diagnostic_ns = ns_now;
             last_grbl_pulse = grbl_pulse;
