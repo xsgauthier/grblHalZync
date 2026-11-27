@@ -13,8 +13,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wno-discarded-qualifiers)
 endif()
 
-add_compile_definitions(F_CPU=3125000)
+add_compile_definitions(F_CPU=390625)
 #add_compile_definitions(SQUARING_ENABLED=1)
+# PWM spindle, no direction
+add_compile_definitions(SPINDLE0_ENABLE=12)
+add_compile_definitions(DEFAULT_STEP_PULSE_MICROSECONDS=5.0)
+add_compile_definitions(DEFAULT_STEP_PULSE_DELAY=10.0)
 
 # add compile deficnitions REAL_IS_DOUBLE if 64 bit os target is detected. This is needed for the simulator to work correctly on 64 bit systems.
 #if(CMAKE_SIZEOF_VOID_P EQUAL 8)
